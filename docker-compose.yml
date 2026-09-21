@@ -1,0 +1,32 @@
+services:
+  api:
+    build: ./backend
+    environment:
+      # 评审默认 demo 模式零配额；填入 AK 后置 0 走真实 API
+      OPENMAP_DEMO_MODE: ${OPENMAP_DEMO_MODE:-1}
+      OPENMAP_BAIDU_AK: ${OPENMAP_BAIDU_AK:-}
+      OPENMAP_BAIDU_SK: ${OPENMAP_BAIDU_SK:-}
+      OPENMAP_API_QPS: ${OPENMAP_API_QPS:-5}
+      OPENMAP_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      # 配置与回放快照外置，改数据不用重建镜像
+      - ./data:/app/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./frontend
+      args:
+        # 前端 AK 为构建期注入（Vite 静态打包特性）
+        VITE_BMAP_AK: ${VITE_BMAP_AK:-}
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
