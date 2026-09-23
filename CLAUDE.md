@@ -20,6 +20,7 @@
 | WSL Ubuntu 3.12.3，但**缺 python3-venv**（`python3 -m venv` 生成的目录无 pip） | 后端依赖用系统 pip 安装：`python3 -m pip install --break-system-packages -e ".[dev]"`（已装好）；**不要**尝试 venv |
 | WSL 调用输出含 UTF-16 告警头，管道过滤要 `tr -d '\0'` | 验证命令输出勿用 grep 吞错误（曾导致误报"install ok"） |
 | Windows 侧 node v24 / npm 可用 | 前端命令直接在 Git Bash 执行 |
+| `make` 仅存在于 WSL（Git Bash 无 make） | 后端相关 make 目标在 WSL 执行；前端在 Git Bash 直跑 npm；一键启动/重启用根目录 `start-dev.bat`（双击即可） |
 | Docker Desktop 可用（WSL2 后端） | compose 构建验证可用，但较慢，优先本地验证 |
 | 本目录不是 git 仓库时要先 `git init` | 交付要求 Git 托管，Apache-2.0 |
 

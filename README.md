@@ -39,6 +39,10 @@ docker compose up -d
 
 ### 方式二：本地开发
 
+**一键启动/重启（Windows 推荐）**：双击仓库根目录 `start-dev.bat`——自动停旧起新，后端（WSL, :8000）与前端（Vite, :5173）在两个独立窗口显示日志，关闭窗口即停止服务。
+
+**手动启动：**
+
 ```bash
 # 后端（Windows 用户请在 WSL 中执行；Windows 侧无可用 Python）
 cd backend

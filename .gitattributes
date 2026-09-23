@@ -1,6 +1,10 @@
 # 跨平台统一 LF：Makefile/脚本在 CRLF 下会失效（WSL/Docker/CI 均为 Linux 侧执行）
 * text=auto eol=lf
 
+# 例外：Windows 批处理必须 CRLF，否则 cmd 的 for/括号块解析异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 # 二进制文件不参与换行转换
 *.png binary
 *.jpg binary
