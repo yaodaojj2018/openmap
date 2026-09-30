@@ -57,7 +57,7 @@ export default function MapCanvas({ ak, center, zoom = 14, onPick, children }: P
         type="warning"
         showIcon
         message="地图无法加载"
-        description={`${error}。可在 frontend/.env.local 中配置 VITE_BMAP_AK（需域名白名单包含当前host），或使用后端 DEMO_MODE 查看数据面板。`}
+        description={`${error}。可在仓库根目录 .env 中配置 VITE_BMAP_AK（需 Referer 白名单包含 localhost），或使用后端 DEMO_MODE 查看数据面板。`}
       />
     )
   }

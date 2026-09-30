@@ -17,6 +17,12 @@ _EE = 0.00669342162296594323  # 第一偏心率平方
 
 LngLat = tuple[float, float]
 
+# 球体地球模型（haversine 同源）：米/度在球面模型下经纬同值。
+# isochrone/sampler 的平面投影必须用同一组常数，否则探针直线距离会漂移
+# （曾因椭球/球体常数混用导致 ~0.6% 距离膨胀，触发回放模式大面积误判不可达）。
+EARTH_RADIUS_M = 6371008.8
+M_PER_DEG = math.pi * EARTH_RADIUS_M / 180.0  # ≈ 111194.93
+
 
 def _transform_lat(x: float, y: float) -> float:
     ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
@@ -94,4 +100,4 @@ def haversine_m(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
         math.sin(dlat / 2) ** 2
         + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin(dlng / 2) ** 2
     )
-    return 2 * 6371008.8 * math.asin(math.sqrt(a))
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))

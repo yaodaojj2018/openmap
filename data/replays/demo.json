@@ -36,5 +36,26 @@
     { "uid": "demo-shop-002", "name": "科源社区农贸市场", "lng": 116.319628, "lat": 39.977909, "address": "科源社区", "tag": "农贸市场", "queries": ["菜市场"] },
     { "uid": "demo-eld-001", "name": "中关村街道养老照料中心", "lng": 116.314628, "lat": 39.978909, "address": "中关村南路3号", "tag": "养老", "queries": ["养老院"] },
     { "uid": "demo-eld-002", "name": "乐龄养老院(海淀院)", "lng": 116.322628, "lat": 39.982909, "address": "知春路29号", "tag": "养老", "queries": ["养老院"] }
-  ]
+  ],
+  "isochrone": {
+    "speed_m_s": 1.35,
+    "profile": [
+      { "theta_deg": 0,     "detour": 1.05, "cap_m": 1500 },
+      { "theta_deg": 22.5,  "detour": 1.10, "cap_m": 1500 },
+      { "theta_deg": 45,    "detour": 1.15, "cap_m": 1500 },
+      { "theta_deg": 67.5,  "detour": 1.20, "cap_m": 1500 },
+      { "theta_deg": 90,    "detour": 1.25, "cap_m": 1500 },
+      { "theta_deg": 112.5, "detour": 1.15, "cap_m": 1500 },
+      { "theta_deg": 135,   "detour": 1.30, "cap_m": 1500 },
+      { "theta_deg": 157.5, "detour": 1.90, "cap_m": 450, "note": "模拟河流/围墙阻挡方向" },
+      { "theta_deg": 180,   "detour": 1.20, "cap_m": 1100 },
+      { "theta_deg": 202.5, "detour": 1.10, "cap_m": 1500 },
+      { "theta_deg": 225,   "detour": 1.05, "cap_m": 1500 },
+      { "theta_deg": 247.5, "detour": 1.00, "cap_m": 1500 },
+      { "theta_deg": 270,   "detour": 1.08, "cap_m": 1500 },
+      { "theta_deg": 292.5, "detour": 1.12, "cap_m": 1500 },
+      { "theta_deg": 315,   "detour": 1.06, "cap_m": 1500 },
+      { "theta_deg": 337.5, "detour": 1.02, "cap_m": 1500 }
+    ]
+  }
 }

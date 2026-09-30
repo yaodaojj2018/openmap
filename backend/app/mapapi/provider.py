@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from app.models.geocode import GeocodeCandidate
+from app.models.isochrone import RouteLeg
 from app.models.poi import PoiRecord
 
 BD09Point = tuple[float, float]
@@ -57,6 +58,16 @@ class MapProvider(Protocol):
         max_pages: int,
     ) -> list[PoiRecord]:
         """圆形区域关键词检索，内部完成翻页聚合。category 字段由调用方回填。"""
+        ...
+
+    async def route_matrix(
+        self, origin: BD09Point, destinations: list[BD09Point]
+    ) -> list[RouteLeg]:
+        """单源批量步行测距测时（等时圈核心探针）。
+
+        返回顺序与 destinations 一一对应；不可达目的地返回 distance/duration 为 None 的 Leg。
+        实现方负责按批量上限分批（铁律 #7：能用批量不逐条）。
+        """
         ...
 
     async def close(self) -> None:

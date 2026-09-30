@@ -85,6 +85,7 @@ make compose-up    # Docker 全栈
 | GET | `/api/v1/health` | 健康检查（含 Provider/缓存模式） |
 | GET | `/api/v1/geocode?q=&city=` | 地址 → BD09 坐标候选列表 |
 | GET | `/api/v1/pois?lng=&lat=&crs=bd09&categories=medical,education` | 分类 POI 检索（圆形区域 + 翻页聚合 + 去重清洗） |
+| POST | `/api/v1/isochrone` | 多级步行等时圈（v1 射线采样 + 批量矩阵 + 闭合样条，`{origin, levels_min?}`） |
 | GET | `/api/v1/demo/hint` | 演示模式示例（示例地址 + 中心点 + 类别） |
 
 ## 项目结构

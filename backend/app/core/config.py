@@ -30,7 +30,11 @@ class Settings(BaseSettings):
     """系统配置。字段名与 env 一一对应，如 OPENMAP_BAIDU_AK。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", env_prefix="OPENMAP_", extra="ignore"
+        # 绝对路径指向仓库根 .env：uvicorn 无论从仓库根还是 backend/ 启动都能读到同一份
+        env_file=str(REPO_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        env_prefix="OPENMAP_",
+        extra="ignore",
     )
 
     app_name: str = "openmap"
@@ -60,6 +64,13 @@ class Settings(BaseSettings):
     poi_search_radius_m: int = 1300  # 覆盖 15min 步行量级（约 1.1km）外扩
     poi_dedup_distance_m: float = 30.0  # 距离阈值内去重
     poi_taxonomy_file: str = str(REPO_ROOT / "data" / "config" / "poi_taxonomy.json")
+
+    # ---- 等时圈引擎（docs/02 §3.1）----
+    matrix_batch_size: int = 50  # routematrix 单批目的地上限（官方口径，可配）
+    isochrone_directions: int = 16  # 扇形采样方向数
+    isochrone_rings_m: list[int] = [300, 600, 900, 1200]  # 粗采样距离档（米）
+    isochrone_refine_rounds: int = 3  # 并行二分轮数（区间收敛至 ~50m）
+    isochrone_levels_min: list[int] = [5, 10, 15]  # 输出的等时圈级别
 
     # ---- 百度 status 码分类覆盖表（键为 int 状态码字符串）----
     # 默认表见 mapapi/baidu/client.py；此处可增量覆盖，如 {"251": "RATE_LIMIT"}

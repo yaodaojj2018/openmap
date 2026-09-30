@@ -11,6 +11,7 @@ from app.mapapi.provider import ErrorKind, MapApiError
 
 GEOCODE_URL = "https://api.map.baidu.com/geocoding/v3/"
 PLACE_URL = "https://api.map.baidu.com/place/v2/search"
+ROUTEMATRIX_URL = "https://api.map.baidu.com/routematrix/v2/walking"
 
 
 def make_client(**overrides: object) -> BaiduClient:
@@ -121,4 +122,53 @@ async def test_poi_cached_on_second_call() -> None:
         records = await client.search_pois("药店", (116.316628, 39.981909), 1300, 20, 5)
         assert len(records) == 3
         assert route.call_count == 1  # 第二次走缓存
+        await client.close()
+
+
+def matrix_payload(n: int, unreachable_last: bool = False) -> dict:
+    results = [
+        {"distance": {"value": 100 * (i + 1)}, "duration": {"value": 60 * (i + 1)}}
+        for i in range(n)
+    ]
+    if unreachable_last:
+        results[-1] = {}  # 百度侧不可达目的地返回空元素
+    return {"status": 0, "result": results}
+
+
+async def test_route_matrix_parses_and_formats_params() -> None:
+    """参数格式（origins/destinations 坐标串）与结果顺序一一对应。"""
+    with respx.mock:
+        route = respx.get(ROUTEMATRIX_URL).mock(
+            return_value=httpx.Response(200, json=matrix_payload(3))
+        )
+        client = make_client()
+        dests = [(116.32, 39.98), (116.33, 39.98), (116.34, 39.98)]
+        legs = await client.route_matrix((116.316628, 39.981909), dests)
+        assert [leg.duration_s for leg in legs] == [60.0, 120.0, 180.0]
+        assert [leg.distance_m for leg in legs] == [100.0, 200.0, 300.0]
+
+        params = route.calls[0].request.url.params
+        assert params["origins"] == "116.316628,39.981909"
+        assert (
+            params["destinations"]
+            == "116.320000,39.980000|116.330000,39.980000|116.340000,39.980000"
+        )
+        await client.close()
+
+
+async def test_route_matrix_batches_by_limit() -> None:
+    """超过 matrix_batch_size 自动分批，跨批结果顺序保持。"""
+    with respx.mock:
+        route = respx.get(ROUTEMATRIX_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=matrix_payload(2)),
+                httpx.Response(200, json=matrix_payload(1, unreachable_last=True)),
+            ]
+        )
+        client = make_client(matrix_batch_size=2)
+        dests = [(116.32, 39.98), (116.33, 39.98), (116.34, 39.98)]
+        legs = await client.route_matrix((116.316628, 39.981909), dests)
+        assert route.call_count == 2
+        assert [leg.duration_s for leg in legs] == [60.0, 120.0, None]
+        assert legs[2].reachable is False
         await client.close()

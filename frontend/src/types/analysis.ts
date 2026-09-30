@@ -36,3 +36,19 @@ export interface DemoHint {
   origin: { lng: number; lat: number; crs: Crs }
   categories: CategoryKey[]
 }
+
+export interface IsochroneLevel {
+  level_min: number
+  /** GeoJSON Polygon rings：[ [ [lng,lat], ... ] ]（bd09） */
+  coordinates: number[][][]
+  area_km2: number
+  confidence: number
+}
+
+export interface IsochroneResult {
+  origin: { lng: number; lat: number; crs: Crs }
+  levels: IsochroneLevel[]
+  probe_count: number
+  matrix_batches: number
+  method: string
+}

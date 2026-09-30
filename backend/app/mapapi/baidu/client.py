@@ -33,6 +33,7 @@ from app.mapapi.provider import (
     MapApiError,
 )
 from app.models.geocode import GeocodeCandidate
+from app.models.isochrone import RouteLeg
 from app.models.poi import PoiRecord
 
 _BASE_URL = "https://api.map.baidu.com"
@@ -182,5 +183,44 @@ class BaiduClient:
             tag=str(item.get("tag", "") or ""),
         )
 
+    # ---- 批量步行测距测时（等时圈探针）----
+
+    async def route_matrix(
+        self, origin: BD09Point, destinations: list[BD09Point]
+    ) -> list[RouteLeg]:
+        """routematrix/v2/walking：按 matrix_batch_size 分批，结果顺序与输入一致。
+
+        分批各自走缓存/限流/重试（复用 _request），任一批不可重试失败即整体抛出，
+        由引擎决定是否降级——铁律 #3：故障策略收口在适配器，语义决策留给编排层。
+        """
+        legs: list[RouteLeg] = []
+        batch_size = max(1, self._s.matrix_batch_size)
+        for start in range(0, len(destinations), batch_size):
+            batch = destinations[start : start + batch_size]
+            data = await self.request(
+                "/routematrix/v2/walking",
+                {
+                    "origins": _fmt_points([origin]),
+                    "destinations": _fmt_points(batch),
+                },
+            )
+            results = data.get("result") or []
+            # 响应按 origin×destination 笛卡尔积行优先排列；单源场景与输入同序
+            for item in results:
+                distance = (item.get("distance") or {}).get("value")
+                duration = (item.get("duration") or {}).get("value")
+                legs.append(
+                    RouteLeg(
+                        distance_m=float(distance) if distance is not None else None,
+                        duration_s=float(duration) if duration is not None else None,
+                    )
+                )
+        return legs
+
     async def close(self) -> None:
         await self._client.aclose()
+
+
+def _fmt_points(points: list[BD09Point]) -> str:
+    """routematrix 坐标串格式：lng,lat|lng,lat（百度侧默认 bd09ll）。"""
+    return "|".join(f"{lng:.6f},{lat:.6f}" for lng, lat in points)

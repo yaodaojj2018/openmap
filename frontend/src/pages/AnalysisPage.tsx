@@ -1,6 +1,6 @@
 /**
- * 主工作台（M1）：左侧地图（点选中心点 / POI 打点），右侧控制面板
- * （地址搜索定位、类目选择、检索结果列表）。M3 在此扩展体检报告与图表。
+ * 主工作台：左侧地图（点选中心点 / POI 打点 / 等时圈多边形），右侧控制面板
+ * （地址搜索定位、类目选择、等时圈生成、检索结果列表）。M3 在此扩展体检报告与图表。
  */
 
 import { useCallback, useState } from 'react'
@@ -20,12 +20,13 @@ import {
   Tabs,
   Typography,
 } from 'antd'
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { SearchOutlined, ReloadOutlined, NodeIndexOutlined } from '@ant-design/icons'
 import MapCanvas from '../components/map/MapCanvas'
 import OriginMarker from '../components/map/OriginMarker'
 import PoiMarkers from '../components/map/PoiMarkers'
+import IsochroneLayer from '../components/map/IsochroneLayer'
 import { CATEGORY_LIST } from '../constants/categories'
-import { fetchDemoHint, geocode, searchPois } from '../api/geo'
+import { computeIsochrone, fetchDemoHint, geocode, searchPois } from '../api/geo'
 import { useAnalysisStore } from '../stores/analysis'
 import type { GeocodeCandidate } from '../types/analysis'
 
@@ -33,7 +34,8 @@ const { Text, Paragraph } = Typography
 
 export default function AnalysisPage() {
   const ak = import.meta.env.VITE_BMAP_AK ?? ''
-  const { origin, address, selected, pois, poiLoading, poiError } = useAnalysisStore()
+  const { origin, address, selected, pois, poiLoading, poiError, isochrone, isoLoading, isoError } =
+    useAnalysisStore()
   const store = useAnalysisStore
   const [query, setQuery] = useState('')
   const [candidates, setCandidates] = useState<GeocodeCandidate[]>([])
@@ -94,6 +96,24 @@ export default function AnalysisPage() {
     }
   }, [store])
 
+  const runIsochrone = useCallback(async () => {
+    const state = store.getState()
+    if (!state.origin) {
+      message.warning('请先通过地址搜索或点击地图选择中心点')
+      return
+    }
+    state.setIsoLoading(true)
+    state.setIsoError(null)
+    try {
+      const result = await computeIsochrone(state.origin)
+      state.setIsochrone(result)
+    } catch (err) {
+      state.setIsoError((err as Error).message)
+    } finally {
+      state.setIsoLoading(false)
+    }
+  }, [store])
+
   const loadDemo = useCallback(async () => {
     try {
       const hint = await fetchDemoHint()
@@ -130,6 +150,7 @@ export default function AnalysisPage() {
           styles={{ body: { height: '68vh' } }}
         >
           <MapCanvas ak={ak} center={{ lng: 116.316628, lat: 39.981909 }} onPick={onPick}>
+            <IsochroneLayer />
             <OriginMarker />
             <PoiMarkers />
           </MapCanvas>
@@ -205,7 +226,42 @@ export default function AnalysisPage() {
             </Space>
           </Card>
 
-          <Card title="③ 检索结果">
+          <Card title="③ 步行等时圈">
+            <Button
+              type="primary"
+              icon={<NodeIndexOutlined />}
+              loading={isoLoading}
+              disabled={!origin}
+              onClick={runIsochrone}
+            >
+              生成等时圈（5 / 10 / 15 分钟）
+            </Button>
+            {isoError && <Alert type="error" showIcon style={{ marginTop: 12 }} message={isoError} />}
+            {isochrone && (
+              <div style={{ marginTop: 12 }}>
+                {isochrone.levels.map((lv) => (
+                  <div key={lv.level_min}>
+                    <Text strong>{lv.level_min} 分钟</Text>
+                    <Text type="secondary">
+                      {' '}
+                      · {lv.area_km2.toFixed(2)} km² · 置信度 {(lv.confidence * 100).toFixed(0)}%
+                    </Text>
+                  </div>
+                ))}
+                <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                  探测 {isochrone.probe_count} 点 · 矩阵调用 {isochrone.matrix_batches} 次 ·
+                  {isochrone.method}
+                </Paragraph>
+              </div>
+            )}
+            {!isochrone && !isoLoading && (
+              <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
+                基于批量步行测时的多级可达边界；河流/围墙方向会形成真实凹陷。
+              </Paragraph>
+            )}
+          </Card>
+
+          <Card title="④ 检索结果">
             {poiError && <Alert type="error" showIcon message={poiError} />}
             {poiLoading && <Spin style={{ display: 'block', margin: '24px auto' }} />}
             {!poiLoading && resultTabs.length === 0 && (

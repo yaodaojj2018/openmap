@@ -15,8 +15,8 @@ wsl -e bash -c "pkill -f 'uvicorn app.main:app' 2>/dev/null; exit 0"
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":5173" ^| findstr "LISTENING"') do taskkill /F /PID %%p >nul 2>&1
 ping -n 2 127.0.0.1 >nul
 
-echo [2/3] Starting backend (WSL, port 8000, demo mode)...
-start "openmap-api" wsl -e bash -c "cd /mnt/d/DockerWSL/openmap/backend && OPENMAP_DEMO_MODE=1 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000; echo; read -p 'Backend exited. Press Enter to close...'"
+echo [2/3] Starting backend (WSL, port 8000, mode from root .env)...
+start "openmap-api" wsl -e bash -c "cd /mnt/d/DockerWSL/openmap/backend && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000; echo; read -p 'Backend exited. Press Enter to close...'"
 
 echo [3/3] Starting frontend (Vite, port 5173)...
 start "openmap-web" cmd /k "cd /d D:\DockerWSL\openmap\frontend && npm run dev"
