@@ -149,14 +149,24 @@ class BaiduClient:
         page_size: int,
         max_pages: int,
     ) -> list[PoiRecord]:
+        """地点检索 3.0 周边检索（/place/v3/around）。
+
+        注意 v3 与 v2 的关键差异（2025 控制台升级后新 AK 权限仅挂 v3，
+        v2 圆形检索对这类 AK 静默返回空结果，已实测踩坑）：
+        - location 参数为「纬度,经度」，与 v2 的「经度,纬度」相反；
+        - radius 仅是召回权重，必须加 radius_limit=true 才严格限定在半径内
+          （生活圈覆盖语义要求严格限定）；
+        - 顶层无 tag 字段，分类在 detail_info.classified_poi_tag（scope=2 时返回）。
+        """
         records: list[PoiRecord] = []
         for page_num in range(max_pages):
             data = await self.request(
-                "/place/v2/search",
+                "/place/v3/around",
                 {
                     "query": query,
-                    "location": f"{center[0]:.6f},{center[1]:.6f}",
+                    "location": f"{center[1]:.6f},{center[0]:.6f}",
                     "radius": str(radius_m),
+                    "radius_limit": "true",
                     "scope": "2",
                     "page_size": str(page_size),
                     "page_num": str(page_num),
@@ -171,6 +181,9 @@ class BaiduClient:
     @staticmethod
     def _parse_poi(item: dict[str, Any]) -> PoiRecord:
         location = item.get("location") or {}
+        detail = item.get("detail_info") or {}
+        # v3 检索结果无顶层 tag，分类标签在 detail_info.classified_poi_tag
+        tag = str(item.get("tag") or detail.get("classified_poi_tag") or "")
         return PoiRecord(
             uid=str(item["uid"]),
             name=str(item.get("name", "")),
@@ -180,7 +193,7 @@ class BaiduClient:
             province=str(item.get("province", "") or ""),
             city=str(item.get("city", "") or ""),
             area=str(item.get("area", "") or ""),
-            tag=str(item.get("tag", "") or ""),
+            tag=tag,
         )
 
     # ---- 批量步行测距测时（等时圈探针）----
@@ -222,5 +235,6 @@ class BaiduClient:
 
 
 def _fmt_points(points: list[BD09Point]) -> str:
-    """routematrix 坐标串格式：lng,lat|lng,lat（百度侧默认 bd09ll）。"""
-    return "|".join(f"{lng:.6f},{lat:.6f}" for lng, lat in points)
+    """routematrix 坐标串格式：lat,lng|lat,lng（该接口纬度在前，与 place v2 相反；
+    传反会得到 status=2 参数非法，已实测）。"""
+    return "|".join(f"{lat:.6f},{lng:.6f}" for lng, lat in points)

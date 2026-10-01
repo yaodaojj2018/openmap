@@ -10,7 +10,7 @@ from app.mapapi.baidu.client import BaiduClient
 from app.mapapi.provider import ErrorKind, MapApiError
 
 GEOCODE_URL = "https://api.map.baidu.com/geocoding/v3/"
-PLACE_URL = "https://api.map.baidu.com/place/v2/search"
+PLACE_URL = "https://api.map.baidu.com/place/v3/around"
 ROUTEMATRIX_URL = "https://api.map.baidu.com/routematrix/v2/walking"
 
 
@@ -82,6 +82,7 @@ async def test_timeout_retries_exhausted() -> None:
 
 
 def place_page(n: int, start_index: int = 0) -> dict:
+    """v3/around 风格响应：分类标签在 detail_info.classified_poi_tag（无顶层 tag）。"""
     return {
         "status": 0,
         "results": [
@@ -90,7 +91,7 @@ def place_page(n: int, start_index: int = 0) -> dict:
                 "name": f"模拟药店{i:03d}",
                 "location": {"lng": 116.31 + i * 1e-5, "lat": 39.98},
                 "address": "模拟地址",
-                "tag": "药店",
+                "detail_info": {"classified_poi_tag": "医疗;药店"},
             }
             for i in range(start_index, start_index + n)
         ],
@@ -109,7 +110,13 @@ async def test_poi_pagination_aggregates() -> None:
         client = make_client()
         records = await client.search_pois("药店", (116.316628, 39.981909), 1300, 20, 5)
         assert len(records) == 23
+        assert records[0].tag == "医疗;药店"
         assert route.call_count == 2
+
+        # v3 关键差异回归：location 为 纬度,经度；radius_limit 严格限定
+        params = route.calls[0].request.url.params
+        assert params["location"] == "39.981909,116.316628"
+        assert params["radius_limit"] == "true"
         await client.close()
 
 
@@ -148,10 +155,11 @@ async def test_route_matrix_parses_and_formats_params() -> None:
         assert [leg.distance_m for leg in legs] == [100.0, 200.0, 300.0]
 
         params = route.calls[0].request.url.params
-        assert params["origins"] == "116.316628,39.981909"
+        # routematrix 坐标格式为 纬度,经度（与 place v2 相反），传反会 status=2
+        assert params["origins"] == "39.981909,116.316628"
         assert (
             params["destinations"]
-            == "116.320000,39.980000|116.330000,39.980000|116.340000,39.980000"
+            == "39.980000,116.320000|39.980000,116.330000|39.980000,116.340000"
         )
         await client.close()
 
