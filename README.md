@@ -104,6 +104,7 @@ make compose-up    # Docker 全栈
 │   └── api/               # axios + SSE 封装
 ├── data/replays/    # 演示/测试用 API 快照（回放模式数据源）
 ├── docs/            # 需求分析、技术方案、算法与测试报告
+│   └── bugfix/      # 重要 Bug 修复归档（现象→根因→修复→验证，规则见 CLAUDE.md）
 └── docker-compose.yml
 ```
 
