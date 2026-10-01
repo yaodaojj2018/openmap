@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     demo_mode: bool = False  # true 时 Provider 切换为快照回放，零配额消耗
     replay_file: str = str(REPO_ROOT / "data" / "replays" / "demo.json")
 
-    # ---- 网络与限流（默认保守值，按账号配额调整）----
-    api_qps: float = 5.0  # 令牌桶速率：每秒补充令牌数
-    api_burst: float = 10.0  # 令牌桶容量：允许的瞬时突发
+    # ---- 网络与限流（默认对齐百度免费档"地点检索并发 3"的口径）----
+    api_qps: float = 2.0  # 令牌桶速率：每秒补充令牌数（留余量压在并发 3 以下）
+    api_burst: float = 3.0  # 令牌桶容量：允许的瞬时并发上限
     http_timeout_s: float = 8.0
     retry_max_attempts: int = 3  # 含首次，仅对可重试错误生效
     retry_backoff_s: float = 0.5  # 指数退避基数
