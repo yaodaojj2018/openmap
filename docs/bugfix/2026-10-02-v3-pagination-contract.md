@@ -1,6 +1,6 @@
 # BF-005 v3 迁移遗留 v2 分页参数：越界页静默空返回（浪费配额 + 召回封顶 60）
 
-- 日期：2026-10-02 　提交：（随本档同提交，hash 见 git log） 　影响模块：backend/app/core/config.py
+- 日期：2026-10-02 　提交：99a52f1 　影响模块：backend/app/core/config.py
 
 ## 现象
 
