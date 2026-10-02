@@ -8,6 +8,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,8 +60,11 @@ class Settings(BaseSettings):
     cache_ttl_s: int = 7 * 24 * 3600  # POI/测时结果缓存 7 天
 
     # ---- POI 检索 ----
-    poi_page_size: int = 20  # 百度 place v2 单页上限（文档口径 20）
-    poi_max_pages: int = 5
+    # v3 地点检索分页契约（官方文档 /place/v3/around）：page_size 取值 10-20（默认 10、
+    # 最大 20，越界被服务端静默钳制）；page_num 仅允许 0、1、2 —— 越界页返回 status=0
+    # 空结果（已实测），既浪费配额又无报错，故在配置层强制校验而非静默容错。
+    poi_page_size: int = Field(default=20, ge=10, le=20)  # 单页条数上限（v3 口径 20）
+    poi_max_pages: int = Field(default=3, ge=1, le=3)  # v3 最多 3 页/查询 → 单类目召回上限 60
     poi_search_radius_m: int = 1300  # 覆盖 15min 步行量级（约 1.1km）外扩
     poi_dedup_distance_m: float = 30.0  # 距离阈值内去重
     poi_taxonomy_file: str = str(REPO_ROOT / "data" / "config" / "poi_taxonomy.json")
