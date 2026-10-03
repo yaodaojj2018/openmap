@@ -1,5 +1,6 @@
 """等时圈端到端测试（回放模式）：M2 验收——15min 圈成形、几何有效、预算受控。"""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import REPO_ROOT, Settings
@@ -48,12 +49,11 @@ async def test_engine_blocked_direction_dent() -> None:
 
 
 async def test_engine_rejects_out_of_range_levels() -> None:
-    import pytest
-
     with pytest.raises(IsochroneError):
         await compute_isochrone(load_provider(), Settings(demo_mode=True), ORIGIN, [45])
 
 
+@pytest.mark.smoke
 def test_api_isochrone_flow() -> None:
     """API 级：默认级别 / 自定义级别 / crs 转换 / 422 校验。"""
     app = create_app(Settings(demo_mode=True))

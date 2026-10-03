@@ -30,10 +30,11 @@ def test_direction_angles_evenly_spaced() -> None:
     assert angles[1] == pytest.approx(spacing)
 
 
+@pytest.mark.regression
 @pytest.mark.parametrize("theta_deg", [0, 45, 90, 157.5, 180, 270])
 @pytest.mark.parametrize("radius", [300, 900, 1200])
 def test_probe_radius_matches_haversine(theta_deg: float, radius: int) -> None:
-    """回归测试：探针布设半径必须与 haversine 量得的直线距离一致。
+    """回归测试（BF-001）：探针布设半径必须与 haversine 量得的直线距离一致。
 
     曾因椭球/球体常数混用（110540 vs 111194.9 m/deg）产生 ~0.6% 距离膨胀，
     导致回放模式在 cap 边界处大面积误判不可达。

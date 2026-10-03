@@ -23,6 +23,7 @@ dependencies = [
 dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
   "respx>=0.21",
   "ruff>=0.4",
   "mypy>=1.9",
@@ -49,3 +50,9 @@ files = ["app"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+addopts = "--strict-markers"
+# 分层标记（docs/regression-ci.md §5）：smoke=主链路冒烟；regression=BF 归档对应回归
+markers = [
+  "smoke: 冒烟测试——主链路 API 最小验证，任何 PR 必须绿",
+  "regression: 历史 Bug 回归——与 docs/bugfix/ 的 BF 编号对应，docstring 注明编号",
+]

@@ -26,8 +26,29 @@ jobs:
         run: ruff check .
       - name: 类型检查
         run: mypy
-      - name: 测试（含回放快照断言）
-        run: pytest -q
+      - name: BF 归档 ↔ 回归测试一致性检查
+        run: python ../scripts/check_bugfix_regression.py
+      - name: 冒烟测试（主链路先行，红了不等全量）
+        run: pytest -m smoke -q
+      - name: 全量测试 + 域层覆盖率门禁（docs/regression-ci.md §3）
+        run: >-
+          pytest -q --cov=app.isochrone --cov=app.poi
+          --cov-fail-under=95 --cov-report=term --junitxml=pytest.xml
+      - name: 测试与覆盖率写入 Job Summary
+        if: always()
+        run: |
+          {
+            echo "## 后端测试与覆盖率报告"
+            echo '```'
+            python -m coverage report || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 上传测试报告（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: backend/pytest.xml
 
   frontend:
     name: 前端 lint / build

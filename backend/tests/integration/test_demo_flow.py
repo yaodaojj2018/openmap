@@ -1,10 +1,16 @@
-"""回放模式端到端测试：M1 验收标准的后端部分——"输入地址出坐标，分类 POI 可检索"。"""
+"""回放模式端到端测试：M1 验收标准的后端部分——"输入地址出坐标，分类 POI 可检索"。
 
+整个文件为主链路冒烟（smoke）：任何 PR 的第一道测试门禁（docs/regression-ci.md §5）。
+"""
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import REPO_ROOT, Settings
 from app.main import create_app
 from app.mapapi.replay.client import ReplayProvider
+
+pytestmark = pytest.mark.smoke
 
 
 def make_demo_app() -> TestClient:

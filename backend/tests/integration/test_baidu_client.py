@@ -98,8 +98,13 @@ def place_page(n: int, start_index: int = 0) -> dict:
     }
 
 
+@pytest.mark.regression
 async def test_poi_pagination_aggregates() -> None:
-    """翻页聚合：首页满页 20 条 → 次页 3 条 → 共 23 条，第三页不再请求。"""
+    """翻页聚合：首页满页 20 条 → 次页 3 条 → 共 23 条，第三页不再请求。
+
+    回归（BF-004）：v3/around 关键差异——location 为 纬度,经度（与 v2 相反）、
+    radius_limit=true 严格限定。新控制台 AK 权限挂在 3.0，v2 圆形检索静默返回空。
+    """
     with respx.mock:
         route = respx.get(PLACE_URL).mock(
             side_effect=[
@@ -142,8 +147,13 @@ def matrix_payload(n: int, unreachable_last: bool = False) -> dict:
     return {"status": 0, "result": results}
 
 
+@pytest.mark.regression
 async def test_route_matrix_parses_and_formats_params() -> None:
-    """参数格式（origins/destinations 坐标串）与结果顺序一一对应。"""
+    """参数格式（origins/destinations 坐标串）与结果顺序一一对应。
+
+    回归（BF-004）：routematrix 坐标串为 纬度,经度（官方示例 origins=40.45,116.41），
+    传反会 status=2 参数非法，等时圈全链路失败。
+    """
     with respx.mock:
         route = respx.get(ROUTEMATRIX_URL).mock(
             return_value=httpx.Response(200, json=matrix_payload(3))
