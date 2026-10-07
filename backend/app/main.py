@@ -12,11 +12,12 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import demo, geocode, health, isochrone, poi
+from app.api.routes import analyses, demo, geocode, health, isochrone, poi
 from app.core.cache import build_cache
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.mapapi import build_provider
+from app.tasks.manager import TaskManager
 
 
 @asynccontextmanager
@@ -30,10 +31,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.cache = await build_cache(settings)
     app.state.provider = build_provider(settings, app.state.cache)
+    app.state.task_manager = TaskManager(app.state.provider, settings, app.state.cache)
 
     if not settings.demo_mode and not settings.baidu_ak:
         log.warning("app.missing_ak_fallback_replay")
     yield
+    await app.state.task_manager.aclose()
     await app.state.provider.close()
 
 
@@ -51,7 +54,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for router in (health.router, geocode.router, poi.router, isochrone.router, demo.router):
+    for router in (
+        health.router,
+        geocode.router,
+        poi.router,
+        isochrone.router,
+        analyses.router,
+        demo.router,
+    ):
         app.include_router(router, prefix="/api/v1")
     return app
 

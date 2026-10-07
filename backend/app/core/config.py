@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     isochrone_refine_rounds: int = 3  # 并行二分轮数（区间收敛至 ~50m）
     isochrone_levels_min: list[int] = [5, 10, 15]  # 输出的等时圈级别
 
+    # ---- 分析任务（docs/02 §5.2）----
+    task_ttl_s: int = 24 * 3600  # 任务状态/报告持久化 TTL（Redis 场景跨重启可恢复）
+
     # ---- 百度 status 码分类覆盖表（键为 int 状态码字符串）----
     # 默认表见 mapapi/baidu/client.py；此处可增量覆盖，如 {"251": "RATE_LIMIT"}
     status_kind_overrides: dict[str, str] = {}

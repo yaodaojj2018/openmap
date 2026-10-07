@@ -1,6 +1,6 @@
 /**
  * 主工作台：左侧地图（点选中心点 / POI 打点 / 等时圈多边形），右侧控制面板
- * （地址搜索定位、类目选择、等时圈生成、检索结果列表）。M3 在此扩展体检报告与图表。
+ * （地址搜索定位、类目选择、一键体检分析 + 进度、结果列表）。M3 在此扩展体检报告与图表。
  */
 
 import { useCallback, useState } from 'react'
@@ -13,6 +13,7 @@ import {
   Input,
   List,
   message,
+  Progress,
   Row,
   Col,
   Space,
@@ -20,13 +21,14 @@ import {
   Tabs,
   Typography,
 } from 'antd'
-import { SearchOutlined, ReloadOutlined, NodeIndexOutlined } from '@ant-design/icons'
+import { SearchOutlined, ReloadOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import MapCanvas from '../components/map/MapCanvas'
 import OriginMarker from '../components/map/OriginMarker'
 import PoiMarkers from '../components/map/PoiMarkers'
 import IsochroneLayer from '../components/map/IsochroneLayer'
 import { CATEGORY_LIST } from '../constants/categories'
-import { computeIsochrone, fetchDemoHint, geocode, searchPois } from '../api/geo'
+import { fetchDemoHint, geocode } from '../api/geo'
+import { STAGE_LABELS, useAnalysisTask } from '../hooks/useAnalysisTask'
 import { useAnalysisStore } from '../stores/analysis'
 import type { GeocodeCandidate } from '../types/analysis'
 
@@ -34,12 +36,28 @@ const { Text, Paragraph } = Typography
 
 export default function AnalysisPage() {
   const ak = import.meta.env.VITE_BMAP_AK ?? ''
-  const { origin, address, selected, pois, poiLoading, poiError, isochrone, isoLoading, isoError } =
-    useAnalysisStore()
+  const {
+    origin,
+    address,
+    selected,
+    pois,
+    poiLoading,
+    poiError,
+    isochrone,
+    isoLoading,
+    isoError,
+    taskStatus,
+    taskStage,
+    taskProgress,
+    taskError,
+    degradedFlags,
+  } = useAnalysisStore()
   const store = useAnalysisStore
+  const { run: runTask } = useAnalysisTask()
   const [query, setQuery] = useState('')
   const [candidates, setCandidates] = useState<GeocodeCandidate[]>([])
   const [searching, setSearching] = useState(false)
+  const taskRunning = taskStatus === 'pending' || taskStatus === 'running'
 
   const applyCandidate = useCallback(
     (cand: GeocodeCandidate) => {
@@ -70,7 +88,8 @@ export default function AnalysisPage() {
     [store],
   )
 
-  const runPoiSearch = useCallback(async () => {
+  /** 一键体检分析：等时圈 → POI → （M3 后续：覆盖/盲区/报告）全流水线，SSE 进度 */
+  const runAnalysis = useCallback(async () => {
     const state = store.getState()
     if (!state.origin) {
       message.warning('请先通过地址搜索或点击地图选择中心点')
@@ -80,39 +99,12 @@ export default function AnalysisPage() {
       message.warning('请至少选择一个设施类目')
       return
     }
-    state.setPoiLoading(true)
-    state.setPoiError(null)
-    try {
-      const result = await searchPois({
-        lng: state.origin.lng,
-        lat: state.origin.lat,
-        categories: state.selected,
-      })
-      state.setPoiResult(result.categories)
-    } catch (err) {
-      state.setPoiError((err as Error).message)
-    } finally {
-      state.setPoiLoading(false)
-    }
-  }, [store])
-
-  const runIsochrone = useCallback(async () => {
-    const state = store.getState()
-    if (!state.origin) {
-      message.warning('请先通过地址搜索或点击地图选择中心点')
-      return
-    }
-    state.setIsoLoading(true)
-    state.setIsoError(null)
-    try {
-      const result = await computeIsochrone(state.origin)
-      state.setIsochrone(result)
-    } catch (err) {
-      state.setIsoError((err as Error).message)
-    } finally {
-      state.setIsoLoading(false)
-    }
-  }, [store])
+    await runTask({
+      lng: state.origin.lng,
+      lat: state.origin.lat,
+      categories: state.selected,
+    })
+  }, [runTask, store])
 
   const loadDemo = useCallback(async () => {
     try {
@@ -122,16 +114,15 @@ export default function AnalysisPage() {
         hint.address,
       )
       setQuery(hint.address)
-      const result = await searchPois({
+      await runTask({
         lng: hint.origin.lng,
         lat: hint.origin.lat,
         categories: hint.categories,
       })
-      store.getState().setPoiResult(result.categories)
     } catch (err) {
       message.error((err as Error).message)
     }
-  }, [store])
+  }, [runTask, store])
 
   const resultTabs = CATEGORY_LIST.filter((c) => pois[c.key]?.length)
 
@@ -204,12 +195,13 @@ export default function AnalysisPage() {
             )}
           </Card>
 
-          <Card title="② 选择设施类目并检索">
+          <Card title="② 选择设施类目并开始体检">
             <Space wrap>
               {CATEGORY_LIST.map((cat) => (
                 <Checkbox
                   key={cat.key}
                   checked={selected.includes(cat.key)}
+                  disabled={taskRunning}
                   onChange={() => store.getState().toggleCategory(cat.key)}
                 >
                   <span style={{ color: cat.color }}>{cat.label}</span>
@@ -217,28 +209,47 @@ export default function AnalysisPage() {
               ))}
             </Space>
             <Space style={{ marginTop: 12 }}>
-              <Button type="primary" loading={poiLoading} onClick={runPoiSearch}>
-                检索周边设施
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={taskRunning}
+                disabled={!origin}
+                onClick={runAnalysis}
+              >
+                开始体检分析
               </Button>
-              <Button icon={<ReloadOutlined />} onClick={loadDemo}>
+              <Button icon={<ReloadOutlined />} disabled={taskRunning} onClick={loadDemo}>
                 加载示例社区
               </Button>
             </Space>
+            {taskRunning && taskStage && (
+              <div style={{ marginTop: 12 }}>
+                <Progress
+                  percent={Math.round(taskProgress * 100)}
+                  size="small"
+                  status="active"
+                  format={() => STAGE_LABELS[taskStage]}
+                />
+              </div>
+            )}
+            {taskError && (
+              <Alert type="error" showIcon style={{ marginTop: 12 }} message={taskError} />
+            )}
+            {degradedFlags.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginTop: 12 }}
+                message={`部分数据降级：${degradedFlags.join('、')}（对应类目按 0 个计）`}
+              />
+            )}
           </Card>
 
           <Card title="③ 步行等时圈">
-            <Button
-              type="primary"
-              icon={<NodeIndexOutlined />}
-              loading={isoLoading}
-              disabled={!origin}
-              onClick={runIsochrone}
-            >
-              生成等时圈（5 / 10 / 15 分钟）
-            </Button>
-            {isoError && <Alert type="error" showIcon style={{ marginTop: 12 }} message={isoError} />}
-            {isochrone && (
-              <div style={{ marginTop: 12 }}>
+            {isoError && <Alert type="error" showIcon message={isoError} />}
+            {isoLoading && <Spin style={{ display: 'block', margin: '24px auto' }} />}
+            {!isoLoading && isochrone && (
+              <div>
                 {isochrone.levels.map((lv) => (
                   <div key={lv.level_min}>
                     <Text strong>{lv.level_min} 分钟</Text>
@@ -257,6 +268,7 @@ export default function AnalysisPage() {
             {!isochrone && !isoLoading && (
               <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
                 基于批量步行测时的多级可达边界；河流/围墙方向会形成真实凹陷。
+                点击"开始体检分析"一键生成。
               </Paragraph>
             )}
           </Card>

@@ -52,3 +52,58 @@ export interface IsochroneResult {
   matrix_batches: number
   method: string
 }
+
+/** ---- 分析任务（docs/02 §5.2/§5.3，对齐 backend/app/models/task.py）---- */
+
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export type TaskStage =
+  | 'pending'
+  | 'resolving'
+  | 'sampling'
+  | 'fitting'
+  | 'poi'
+  | 'coverage'
+  | 'blindspot'
+  | 'completed'
+
+export interface AnalysisParams {
+  origin: { lng: number; lat: number; crs: Crs }
+  minutes: number
+  categories: CategoryKey[]
+}
+
+export interface AnalysisTask {
+  task_id: string
+  params: AnalysisParams
+  status: TaskStatus
+  stage: TaskStage
+  progress: number
+  degraded_flags: string[]
+  api_call_stats: Record<string, number>
+  created_at: string
+  error: string | null
+}
+
+/** SSE 事件统一载荷（event 字段区分类型；cancelled 为单活跃取消的扩展事件） */
+export interface TaskEvent {
+  event: 'stage' | 'progress' | 'completed' | 'failed' | 'cancelled'
+  task_id: string
+  stage?: TaskStage
+  progress?: number
+  status?: TaskStatus
+  error?: string | null
+  degraded_flags?: string[]
+}
+
+/** 完整分析报告（对齐 backend/app/models/report.py；坐标 bd09） */
+export interface AnalysisReport {
+  task_id: string
+  origin: { lng: number; lat: number; crs: Crs }
+  minutes: number
+  isochrone: IsochroneResult
+  poi: PoiSearchResult
+  degraded_flags: string[]
+  api_call_stats: Record<string, number>
+  generated_at: string
+}

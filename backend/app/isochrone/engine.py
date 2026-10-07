@@ -8,6 +8,7 @@ Provider 由调用方注入（依赖倒置）；引擎只做几何决策与预�
 from __future__ import annotations
 
 import math
+from collections.abc import Awaitable, Callable
 
 import structlog
 
@@ -24,13 +25,30 @@ class IsochroneError(ValueError):
     """输入非法（levels 越界等），路由层据此映射 422。"""
 
 
+ProgressHook = Callable[[str, float], Awaitable[None]]
+"""进度钩子：(阶段名 "sampling"|"fitting", 阶段内局部进度 0-1)。
+
+引擎只报本地视角（域层不感知任务语义，铁律 #2）；全局进度窗口映射
+（docs/02 §5.1 的 30%→70%）由任务编排层（tasks/pipeline）负责。
+"""
+
+
+async def _report(hook: ProgressHook | None, stage: str, frac: float) -> None:
+    if hook is not None:
+        await hook(stage, frac)
+
+
 async def compute_isochrone(
     provider: MapProvider,
     settings: Settings,
     origin: BD09Point,
     levels_min: list[int],
+    on_progress: ProgressHook | None = None,
 ) -> IsochroneResult:
-    """计算多级步行等时圈（v1：射线插值 + 闭合样条，docs/02 §3.1）。"""
+    """计算多级步行等时圈（v1：射线插值 + 闭合样条，docs/02 §3.1）。
+
+    on_progress 可选：阶段 A/B 进度以 "sampling" 上报、阶段 C 以 "fitting" 上报。
+    """
     levels = sorted(set(levels_min))
     if not levels or any(not 1 <= m <= 30 for m in levels):
         raise IsochroneError("levels_min 需为 1-30 分钟内的非空集合")
@@ -39,15 +57,17 @@ async def compute_isochrone(
     field = TimeField(settings.isochrone_directions)
     batches = 0
 
-    # 阶段 A：方向 × 距离档全网格粗采样
+    # 阶段 A：方向 × 距离档全网格粗采样（1 次矩阵调用 ≈ 采样预算的 1/4，B 至多 3 次）
+    await _report(on_progress, "sampling", 0.0)
     probes = probe_points(origin, settings.isochrone_directions, settings.isochrone_rings_m)
     legs = await provider.route_matrix(origin, [(p.lng, p.lat) for p in probes])
     field.ingest(probes, legs)
     batches += math.ceil(len(probes) / settings.matrix_batch_size)
+    await _report(on_progress, "sampling", 0.25)
 
     # 阶段 B：仅对最大级别二分细化——外圈是产品核心输出，内圈粗粒度可接受（v1 取舍）
     target_s = levels[-1] * 60
-    for _ in range(settings.isochrone_refine_rounds):
+    for round_no in range(settings.isochrone_refine_rounds):
         brackets = field.refine_brackets(target_s)
         if not brackets:
             break
@@ -55,10 +75,14 @@ async def compute_isochrone(
         legs = await provider.route_matrix(origin, [(p.lng, p.lat) for p in mids])
         field.ingest(mids, legs)
         batches += math.ceil(len(mids) / settings.matrix_batch_size)
+        await _report(
+            on_progress, "sampling", 0.25 + 0.75 * (round_no + 1) / settings.isochrone_refine_rounds
+        )
 
     # 阶段 C：逐级拟合（时间场复用，无额外 API 消耗）
+    await _report(on_progress, "fitting", 0.0)
     out_levels: list[IsochroneLevel] = []
-    for minute in levels:
+    for idx, minute in enumerate(levels):
         rings, area_km2, confidence = fit_level(origin, field.level_radius(minute * 60))
         out_levels.append(
             IsochroneLevel(
@@ -68,6 +92,7 @@ async def compute_isochrone(
                 confidence=confidence,
             )
         )
+        await _report(on_progress, "fitting", (idx + 1) / len(levels))
 
     log.info(
         "isochrone.done",
