@@ -1,0 +1,5 @@
+# Conventional Commits 门禁：commitlint 校验提交信息（规则见根目录 commitlint.config.mjs）。
+# node 不可用时（如 WSL 裸环境提交）软放行——日常提交在 Windows Git Bash（有 node），
+# 主防线不受影响；此分支仅为避免无 node 环境被钩子阻断。
+command -v node >/dev/null 2>&1 || exit 0
+frontend/node_modules/.bin/commitlint --config commitlint.config.mjs --edit "$1"
