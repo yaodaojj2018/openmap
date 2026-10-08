@@ -50,7 +50,10 @@ class Settings(BaseSettings):
 
     # ---- 网络与限流（默认对齐百度免费档"地点检索并发 3"的口径）----
     api_qps: float = 2.0  # 令牌桶速率：每秒补充令牌数（留余量压在并发 3 以下）
-    api_burst: float = 3.0  # 令牌桶容量：允许的瞬时并发上限
+    # 令牌桶容量：允许的瞬时并发上限。个人认证 AK 的并发配额按"全端点合并"计（实测：
+    # geocode + 矩阵 2 批共 3 个请求同秒落地即触发 status=302 限流，见 docs/bugfix/
+    # 2026-10-09-routematrix-status-302.md），故容量压到 2 留出端点间余量。
+    api_burst: float = 2.0
     http_timeout_s: float = 8.0
     retry_max_attempts: int = 3  # 含首次，仅对可重试错误生效
     retry_backoff_s: float = 0.5  # 指数退避基数

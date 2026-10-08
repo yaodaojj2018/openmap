@@ -73,6 +73,29 @@ async def test_server_error_retried_then_ok() -> None:
         await client.close()
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("status", [302, 401])
+async def test_concurrency_limit_status_retried_then_ok(status: int) -> None:
+    """并发限流（status=302/401"当前并发量已超约定并发配额"）按 RATE_LIMIT 退避重试自愈。
+
+    回归（BF-009）：routematrix 的并发限流码曾未收录归 UNKNOWN（不可重试、不构成
+    熔断证据），QPS=2 稳态连打第 5 批矩阵即触发，批量矩阵直接失败、等时圈整体
+    降级直线估算——本应退避 0.5s 重试一次即自愈。
+    """
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=geocode_payload(status=status)),
+                httpx.Response(200, json=geocode_payload()),
+            ]
+        )
+        client = make_client()
+        candidates = await client.geocode("某地址")
+        assert len(candidates) == 1
+        assert route.call_count == 2, "并发限流必须退避重试而非直接失败"
+        await client.close()
+
+
 async def test_timeout_retries_exhausted() -> None:
     """超时连续 3 次（默认重试上限）后抛 TIMEOUT。"""
     with respx.mock:

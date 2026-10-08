@@ -51,6 +51,12 @@ _DEFAULT_STATUS_KIND: dict[int, ErrorKind] = {
     4: ErrorKind.QUOTA,
     5: ErrorKind.AUTH,
     210: ErrorKind.AUTH,
+    # 302/401 = "当前并发量已经超过约定并发配额，限制访问"（RequestLimitExceeded）：
+    # 瞬时并发限流而非配额耗尽，退避重试即可自愈。401 为实测捕获（2026-10-09 真实采集，
+    # QPS=2 稳态连打第 5 批矩阵触发）；曾因未收录归 UNKNOWN 不可重试，导致批量矩阵
+    # 失败、等时圈被迫整体降级（docs/bugfix/2026-10-09-routematrix-concurrency-limit.md）。
+    302: ErrorKind.RATE_LIMIT,
+    401: ErrorKind.RATE_LIMIT,
 }
 
 

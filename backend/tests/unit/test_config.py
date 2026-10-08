@@ -62,13 +62,14 @@ def test_env_file_anchored_to_repo_root() -> None:
 
 
 def test_rate_limit_defaults_match_free_tier(monkeypatch: pytest.MonkeyPatch) -> None:
-    """回归（BF-003）：默认限流必须压在免费档"地点检索并发 3"契约之内。
+    """回归（BF-003/BF-009）：默认限流必须压在 AK 级并发配额契约之内。
 
-    曾默认 qps=5 / burst=10，四类目 asyncio.gather 瞬时并发 4 触发百度告警短信。
-    默认值是契约的镜像：若官方放宽并发，应连本测试与 docs/02 一并更新，
-    而不是只改数字。
+    曾默认 qps=5 / burst=10，四类目 asyncio.gather 瞬时并发 4 触发百度告警短信
+    （BF-003）；burst=3 时 geocode + 矩阵首批同秒 3 发仍触发批量接口并发限流
+    status=401（BF-009），故容量进一步压到 2。默认值是契约的镜像：若官方放宽
+    并发，应连本测试与 docs/02 一并更新，而不是只改数字。
     """
     _isolated_env(monkeypatch, "OPENMAP_API_QPS", "OPENMAP_API_BURST")
     s = Settings(demo_mode=True, _env_file=None)
     assert s.api_qps == 2.0
-    assert s.api_burst == 3.0
+    assert s.api_burst == 2.0
