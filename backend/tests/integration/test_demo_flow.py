@@ -45,6 +45,19 @@ async def test_replay_poi_radius_and_noise() -> None:
     assert len(education) == 4
 
 
+async def test_replay_walking_route_matches_matrix_model() -> None:
+    """降级链中间级回放（docs/02 §3.4）：walking_route 与 route_matrix 同模型——
+    同一 OD 两法结果必须一致，否则降级前后判定口径漂移。"""
+    provider = load_provider()
+    origin = (116.316628, 39.981909)
+    dests = [(116.326628, 39.981909), (116.316628, 39.991909)]
+    matrix_legs = await provider.route_matrix(origin, dests)
+    for dest, matrix_leg in zip(dests, matrix_legs, strict=True):
+        walking_leg = await provider.walking_route(origin, dest)
+        assert walking_leg.distance_m == matrix_leg.distance_m
+        assert walking_leg.duration_s == matrix_leg.duration_s
+
+
 def test_api_demo_flow() -> None:
     """API 级冒烟：health → demo hint → geocode → pois → 参数校验 422。"""
     with make_demo_app() as client:

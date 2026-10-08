@@ -13,11 +13,13 @@ from typing import Protocol
 import structlog
 
 from app.blindspot.grid import compute_blindspot
+from app.core.budget import budget_scope, current_budget
 from app.core.config import Settings
 from app.coverage.funnel import (
     build_polygon,
     classify_facilities,
     merge_matrix_verdicts,
+    merge_walking_verdicts,
     summarize_categories,
 )
 from app.isochrone.engine import compute_isochrone
@@ -86,8 +88,33 @@ class CountingProvider:
         self._tick("route_matrix")
         return await self.inner.route_matrix(origin, destinations)
 
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        self._tick("walking_route")
+        return await self.inner.walking_route(origin, destination)
+
     async def close(self) -> None:
         await self.inner.close()
+
+
+async def _verify_by_walking(
+    provider: MapProvider, origin: BD09Point, destinations: list[BD09Point]
+) -> list[RouteLeg | None] | None:
+    """降级链第二级：逐条步行规划实测（docs/02 §3.4，预算门控）。
+
+    剩余名额不足以覆盖全部目的地时整层跳过（返回 None，编排层落到第三级
+    保留插值口径）——逐条部分执行会让"哪些设施被实测"取决于失败时机，
+    引入选择偏差。单条失败位置为 None：该设施回落插值口径，不冒充实测。
+    """
+    budget = current_budget()
+    if budget is not None and budget.remaining < len(destinations):
+        return None
+    legs: list[RouteLeg | None] = []
+    for dest in destinations:
+        try:
+            legs.append(await provider.walking_route(origin, dest))
+        except MapApiError:
+            legs.append(None)  # 含预算中途耗尽（BUDGET_EXCEEDED）：单条回落第三级
+    return legs
 
 
 def resolve_levels(minutes: int, settings: Settings) -> list[int]:
@@ -103,6 +130,24 @@ async def run_analysis(
     reporter: TaskReporter,
 ) -> AnalysisReport:
     """执行完整分析流水线，产出报告（含降级标记与 API 统计）。
+
+    全程运行在 QuotaBudget 作用域内（docs/02 §3.4）：出站 HTTP 以
+    settings.analysis_api_budget 为硬上限，超限由适配器抛 BUDGET_EXCEEDED，
+    各阶段按降级链收口（失败语义见 _run_analysis docstring）。gather 派生的
+    子任务共享同一预算实例，物理口径统计（http_calls/cache_hits/retries）并入报告。
+    """
+    with budget_scope(settings.analysis_api_budget):
+        return await _run_analysis(task_id, params, provider, settings, reporter)
+
+
+async def _run_analysis(
+    task_id: str,
+    params: AnalysisParams,
+    provider: MapProvider,
+    settings: Settings,
+    reporter: TaskReporter,
+) -> AnalysisReport:
+    """流水线主体（在 run_analysis 的预算作用域内执行）。
 
     失败语义：等时圈失败 = 整体失败（无圈则无报告）；单类目 POI 失败 = 降级标记
     继续（docs/02 §3.4：POI 为空显式报告"该类 0 个"而非报错）。
@@ -137,6 +182,9 @@ async def run_analysis(
     )
     isochrone = computation.result
     time_field = computation.field
+    if isochrone.degraded_reason is not None:
+        # 等时圈估算口径（docs/02 §3.4 第三级）：报告必须显式声明，不冒充实测
+        degraded.append(f"isochrone:{isochrone.degraded_reason}")
 
     # ③ poi：逐类目隔离失败——单类目不可用记降级标记，不拖垮整体。
     #    逐 key 调用 search_categories（其内部即单协程 gather），失败面收敛到单类目。
@@ -199,12 +247,26 @@ async def run_analysis(
             verdicts = merge_matrix_verdicts(verdicts, chosen, legs, threshold_s)
             verified = len(chosen)
         except (MapApiError, ValueError) as exc:
-            # 精判失败不拖垮报告：保留插值口径判定并降级标记（docs/02 §3.4 降级链）。
-            # ValueError 兜底：Provider 违反 1:1 返回契约（响应缺行）时 merge 的
-            # zip(strict) 抛错——本阶段的承诺是"精判可失败"，失败面不得击穿整体。
-            degraded.append("coverage:matrix:unavailable")
+            # 降级链（docs/02 §3.4）：矩阵失败 → 逐条规划（第二级）→ 保留插值口径
+            # （第三级）。ValueError 兜底：Provider 违反 1:1 返回契约（响应缺行，
+            # BF-006）时 merge 的 zip(strict) 抛错——本阶段的承诺是"精判可失败"，
+            # 失败面不得击穿整体。
             kind = exc.kind.value if isinstance(exc, MapApiError) else "CONTRACT_VIOLATION"
-            log.warning("analysis.coverage_matrix_degraded", task_id=task_id, kind=kind)
+            walking_legs = await _verify_by_walking(counting, origin_bd09, destinations)
+            if walking_legs is None:
+                degraded.append("coverage:matrix:unavailable")
+                log.warning("analysis.coverage_matrix_degraded", task_id=task_id, kind=kind)
+            else:
+                verdicts, verified = merge_walking_verdicts(
+                    verdicts, chosen, walking_legs, threshold_s
+                )
+                degraded.append("coverage:matrix:fallback-walking")
+                log.warning(
+                    "analysis.coverage_walking_fallback",
+                    task_id=task_id,
+                    kind=kind,
+                    measured=verified,
+                )
     coverage = CoverageResult(
         threshold_min=params.minutes,
         facilities=verdicts,
@@ -244,6 +306,16 @@ async def run_analysis(
     )
 
     origin_coord = Coord(lng=origin_bd09[0], lat=origin_bd09[1], crs="bd09")
+    # 物理口径统计并入 api_call_stats（docs/02 §7.5）：逻辑端点计数之外的
+    # 出站 HTTP / 缓存命中 / 重试开销——评审可直接量化，也服务于预算验收断言
+    stats: dict[str, int] = dict(counting.counts)
+    budget = current_budget()
+    if budget is not None:
+        stats |= {
+            "http_calls": budget.http_calls,
+            "cache_hits": budget.cache_hits,
+            "retries": budget.retries,
+        }
     return AnalysisReport(
         task_id=task_id,
         origin=origin_coord,
@@ -258,6 +330,6 @@ async def run_analysis(
         blindspot=blindspot,
         overall_score=overall_score,
         degraded_flags=degraded,
-        api_call_stats=dict(counting.counts),
+        api_call_stats=stats,
         generated_at=datetime.now(UTC),
     )

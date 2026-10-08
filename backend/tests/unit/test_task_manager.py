@@ -71,6 +71,10 @@ class SlowProvider:
         await self._throttle()
         return await self._inner.route_matrix(origin, destinations)
 
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        await self._throttle()
+        return await self._inner.walking_route(origin, destination)
+
     async def close(self) -> None:
         await self._inner.close()
 
@@ -102,12 +106,15 @@ class FlakyMedicalProvider:
     ) -> list[RouteLeg]:
         return await self._inner.route_matrix(origin, destinations)
 
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        return await self._inner.walking_route(origin, destination)
+
     async def close(self) -> None:
         await self._inner.close()
 
 
 class BrokenMatrixProvider:
-    """矩阵调用持续失败——验证等时圈失败 → 任务 failed 且错误文案不裸露上游细节。"""
+    """矩阵与逐条规划全部持续失败——验证降级链走到底：估算口径完成而非任务报废。"""
 
     def __init__(self) -> None:
         self.name = "broken"
@@ -130,6 +137,9 @@ class BrokenMatrixProvider:
     ) -> list[RouteLeg]:
         raise MapApiError(ErrorKind.TIMEOUT, "模拟上游持续超时")
 
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        raise MapApiError(ErrorKind.TIMEOUT, "模拟逐条规划同样故障")
+
     async def close(self) -> None:
         return None
 
@@ -139,14 +149,15 @@ class TruncatingMatrixProvider:
 
     注入点：正东 1050m（demo profile 0° detour=1.05/speed=1.35 → t̂≈817s，
     落入 15min±2min 边缘带 [780,1020]s，且距圈内边界约 107m 在多边形内）——
-    确保覆盖精判必然发起第 5 次矩阵调用（等时圈引擎固定消耗 4 次：
-    阶段 A 1 次 + 二分 ≤3 次）；该次调用被截去一行，模拟上游丢行。
+    覆盖精判必然把该设施发进矩阵，届时截去一行模拟上游丢行。
+
+    命中判据用坐标而非调用序号：等时圈引擎的矩阵调用次数随采样策略演进
+    （M4 起多了双法加密），按序号跳过会让"截谁"随引擎改动漂移。
     """
 
-    def __init__(self, inner: MapProvider, skip_first: int = 4) -> None:
+    def __init__(self, inner: MapProvider) -> None:
         self._inner = inner
-        self._skip_first = skip_first
-        self._calls = 0
+        self._edge_point: BD09Point | None = None
         self.name = inner.name
 
     async def geocode(self, address: str, city: str | None = None) -> list[GeocodeCandidate]:
@@ -163,6 +174,7 @@ class TruncatingMatrixProvider:
         records = await self._inner.search_pois(query, center, radius_m, page_size, max_pages)
         if query == "药店":
             lng, lat = offset_lnglat(center[0], center[1], 1050.0, 0.0)
+            self._edge_point = (lng, lat)
             records.append(
                 PoiRecord(uid="edge-east", name="模拟药店edge", lng=lng, lat=lat, tag="医疗;药店")
             )
@@ -172,10 +184,16 @@ class TruncatingMatrixProvider:
         self, origin: BD09Point, destinations: list[BD09Point]
     ) -> list[RouteLeg]:
         legs = await self._inner.route_matrix(origin, destinations)
-        self._calls += 1
-        if self._calls > self._skip_first and legs:
+        target = self._edge_point
+        hit = target is not None and any(
+            abs(lng - target[0]) < 1e-6 and abs(lat - target[1]) < 1e-6 for lng, lat in destinations
+        )
+        if hit and legs:
             return legs[:-1]  # 模拟上游丢行
         return legs
+
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        return await self._inner.walking_route(origin, destination)
 
     async def close(self) -> None:
         await self._inner.close()
@@ -302,11 +320,12 @@ async def test_poi_single_category_failure_degrades() -> None:
 
 @pytest.mark.regression
 async def test_matrix_row_loss_degrades_coverage_not_task() -> None:
-    """矩阵响应缺行（违反 1:1 契约）：覆盖精判降级标记，任务仍完成出报告。
+    """矩阵响应缺行（违反 1:1 契约）：降级链第二级逐条规划收口，任务仍完成出报告。
 
     回归（BF-006）：merge 的 zip(strict) ValueError 曾逃逸"只捕 MapApiError"
     的降级守卫直达兜底 except Exception——任务在等时圈+POI 预算全部花完后
-    整体报废，违背"精判失败不拖垮报告"的阶段承诺。
+    整体报废，违背"精判失败不拖垮报告"的阶段承诺。M4 起矩阵失败先走
+    逐条 walking_route（回放 Provider 可用）再落插值口径。
     """
     mgr = make_manager(TruncatingMatrixProvider(load_replay()))
     task = await mgr.create(AnalysisParams(origin=Coord(**ORIGIN)))
@@ -314,25 +333,39 @@ async def test_matrix_row_loss_degrades_coverage_not_task() -> None:
     final = await mgr.join(task.task_id)
     assert final is not None
     assert final.status is TaskStatus.completed, "缺行只降级覆盖精判，不失败任务"
-    assert "coverage:matrix:unavailable" in final.degraded_flags
-    # 覆盖精判 = 1 次逻辑调用（等时圈 4 + 精判 1）：分批收口在适配器，
-    # 编排层不得重切批——否则 api_call_stats 与等时圈计数口径分裂
-    assert final.api_call_stats["route_matrix"] == 5
+    assert "coverage:matrix:fallback-walking" in final.degraded_flags
+    # 逐条规划按边缘带设施数计；矩阵只被丢掉一行（精判那 1 次逻辑调用）
+    assert final.api_call_stats["route_matrix"] >= 5
+    assert final.api_call_stats.get("walking_route", 0) >= 1
 
     report = await mgr.result(task.task_id)
     assert report is not None
-    assert report.coverage is not None, "降级后仍产出插值口径的覆盖判定"
+    assert report.coverage is not None, "降级后仍产出判定（部分实测 + 部分插值口径）"
 
 
-async def test_isochrone_failure_fails_task_with_translated_error() -> None:
+async def test_matrix_failure_degrades_to_estimate_not_fail() -> None:
+    """矩阵与逐条规划全部故障：等时圈回落直线×1.3 估算，任务降级完成不报废。
+
+    M4 口径变更（docs/02 §3.4）：此前等时圈矩阵失败 = 整任务 failed；
+    现在落入降级链第三级——报告仍产出，等时圈低置信度 + degraded_flags 声明，
+    上游错误细节不裸露（manager 的 MapApiError 转译分支保留为纵深防御）。
+    """
     mgr = make_manager(BrokenMatrixProvider())
     task = await mgr.create(AnalysisParams(origin=Coord(**ORIGIN)))
 
     final = await mgr.join(task.task_id)
     assert final is not None
-    assert final.status is TaskStatus.failed
-    assert final.error == "地图服务暂时不可用，请稍后重试", "上游细节不裸露"
-    assert await mgr.result(task.task_id) is None
+    assert final.status is TaskStatus.completed, "降级链兜底：估算口径完成而非失败"
+    assert "isochrone:matrix:unavailable" in final.degraded_flags
+
+    report = await mgr.result(task.task_id)
+    assert report is not None
+    assert report.isochrone.degraded_reason == "matrix:unavailable"
+    assert report.isochrone.method == "straight-estimate"
+    assert [lv.level_min for lv in report.isochrone.levels] == [5, 10, 15]
+    assert all(
+        lv.confidence <= Settings().fallback_confidence_cap for lv in report.isochrone.levels
+    ), "估算口径置信度必须封顶（低置信度标注）"
 
 
 async def test_unknown_task_returns_none() -> None:

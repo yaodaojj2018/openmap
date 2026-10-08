@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,19 @@ class ReplayProvider:
         detour/cap 按方位角从 isochrone.profile 双向环绕线性插值，
         使相邻方向过渡平滑（凹陷无锯齿）。
         """
+        simulate = self._simulator()
+        return [simulate(origin, (lng, lat)) for lng, lat in destinations]
+
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        """单对 OD 模拟：与 route_matrix 完全同模型（降级链中间级的回放口径）。
+
+        复用 isochrone 快照的 speed/detour/cap 参数——两方法对同一 OD 必须给出
+        一致的模拟结果，否则降级前后判定口径漂移，测试无法断言。
+        """
+        return self._simulator()(origin, destination)
+
+    def _simulator(self) -> Callable[[BD09Point, BD09Point], RouteLeg]:
+        """构建单点测时模拟闭包（route_matrix / walking_route 共用）。"""
         profile = self._snap.get("isochrone") or {}
         speed = float(profile.get("speed_m_s", 1.35))
         nodes: list[tuple[float, float, float]] = [
@@ -97,20 +111,20 @@ class ReplayProvider:
             )
             for p in profile.get("profile", [])
         ]
-        legs: list[RouteLeg] = []
-        for lng, lat in destinations:
-            straight = haversine_m(origin[0], origin[1], lng, lat)
+
+        def simulate(origin: BD09Point, target: BD09Point) -> RouteLeg:
+            straight = haversine_m(origin[0], origin[1], target[0], target[1])
             if nodes:
-                theta = _bearing_rad(origin, (lng, lat))
+                theta = _bearing_rad(origin, target)
                 detour, cap = _interp_profile(nodes, theta)
             else:
                 detour, cap = 1.0, 10_000.0
             if straight > cap:
-                legs.append(RouteLeg(distance_m=None, duration_s=None))
-                continue
+                return RouteLeg(distance_m=None, duration_s=None)
             distance = straight * detour
-            legs.append(RouteLeg(distance_m=distance, duration_s=distance / speed))
-        return legs
+            return RouteLeg(distance_m=distance, duration_s=distance / speed)
+
+        return simulate
 
     async def close(self) -> None:
         return None

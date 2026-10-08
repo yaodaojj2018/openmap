@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     retry_max_attempts: int = 3  # 含首次，仅对可重试错误生效
     retry_backoff_s: float = 0.5  # 指数退避基数
 
+    # ---- 熔断（docs/02 §3.4：连续瞬时失败 → 打开期内快速失败，不出站不耗配额）----
+    breaker_fail_threshold: int = 5  # 连续瞬时错误（TIMEOUT/SERVER/RATE_LIMIT）达阈值 → 打开
+    breaker_open_s: float = 30.0  # 打开时长；到期后半开放单个探针请求
+
     # ---- 缓存 ----
     redis_url: str = ""  # 空 = 进程内内存缓存（开发/CI 友好）
     cache_ttl_s: int = 7 * 24 * 3600  # POI/测时结果缓存 7 天
@@ -76,6 +80,13 @@ class Settings(BaseSettings):
     isochrone_refine_rounds: int = 3  # 并行二分轮数（区间收敛至 ~50m）
     isochrone_levels_min: list[int] = [5, 10, 15]  # 输出的等时圈级别
 
+    # ---- 等时圈双法交叉校验与加密（docs/02 §3.1 阶段 C/D，纯几何零额外基础配额）----
+    isochrone_grid_step_m: int = 100  # 第二法网格步长（marching squares 格距）
+    isochrone_grid_extent_m: int = 2400  # 网格覆盖半径；兼作散点外推环半径，保证级别圈闭合
+    isochrone_verify_tolerance_m: float = 100.0  # 双法径向偏差阈值，超出即加密重采样
+    isochrone_densify_max_probes: int = 10  # 单轮加密探针总上限（仍落在 1 次批量矩阵内）
+    isochrone_enclave_jump_ratio: float = 2.0  # 相邻方向临界半径比阈值 → 疑似飞地扇区
+
     # ---- 覆盖判定三级漏斗（docs/02 §3.2）----
     coverage_edge_band_min: float = 2.0  # 边缘带半宽：t̂ ∈ [T±band] 触发矩阵精判
     coverage_matrix_verify_limit: int = 30  # 三级漏斗 API 上限：超出的设施按插值口径收尾
@@ -91,6 +102,12 @@ class Settings(BaseSettings):
 
     # ---- 分析任务（docs/02 §5.2）----
     task_ttl_s: int = 24 * 3600  # 任务状态/报告持久化 TTL（Redis 场景跨重启可恢复）
+    analysis_api_budget: int = 40  # 单次分析出站 HTTP 硬上限（docs/02 §3.4 QuotaBudget）
+
+    # ---- 降级链第三级（docs/02 §3.4：矩阵/逐条均失败时直线×1.3 模型估算兜底）----
+    fallback_walk_speed_mps: float = 1.35  # 模型步速 m/s（与回放模拟口径一致）
+    fallback_detour_factor: float = 1.3  # 直线→路网经验系数
+    fallback_confidence_cap: float = 0.3  # 估算模式的等时圈置信度封顶（低置信度标注）
 
     # ---- 百度 status 码分类覆盖表（键为 int 状态码字符串）----
     # 默认表见 mapapi/baidu/client.py；此处可增量覆盖，如 {"251": "RATE_LIMIT"}

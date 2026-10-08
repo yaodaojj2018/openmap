@@ -37,3 +37,10 @@ class IsochroneResult(BaseModel):
     probe_count: int = Field(description="总探测点数（含二分细化）")
     matrix_batches: int = Field(description="批量矩阵调用次数（API 成本口径）")
     method: str = "ray-spline-v1"
+    degraded_reason: str | None = Field(
+        default=None,
+        description=(
+            "降级原因：matrix:unavailable / budget:exhausted——矩阵失败后"
+            "改用直线×1.3 模型估算（docs/02 §3.4 第三级），method 同步切换"
+        ),
+    )

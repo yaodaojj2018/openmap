@@ -115,6 +115,35 @@ def merge_matrix_verdicts(
     return out
 
 
+def merge_walking_verdicts(
+    verdicts: list[FacilityCoverage],
+    edge_indices: list[int],
+    legs: list[RouteLeg | None],
+    threshold_s: float,
+) -> tuple[list[FacilityCoverage], int]:
+    """三级漏斗降级收口（docs/02 §3.4 第二级）：逐条路径规划实测覆写。
+
+    与 merge_matrix_verdicts 的差异：legs 中 None（该条规划失败/预算拦截）
+    保留插值口径判定，不冒充实测；返回 (判定列表, 实测条数)。
+    """
+    out = list(verdicts)
+    measured = 0
+    for idx, leg in zip(edge_indices, legs, strict=True):
+        if leg is None:
+            continue
+        est_min = leg.duration_s / 60 if leg.duration_s is not None else None
+        out[idx] = out[idx].model_copy(
+            update={
+                "est_walk_time_min": est_min,
+                "in_circle": leg.duration_s is not None and leg.duration_s <= threshold_s,
+                "method": CoverageMethod.WALKING,
+                "confidence": 1.0,
+            }
+        )
+        measured += 1
+    return out, measured
+
+
 def summarize_categories(
     verdicts: list[FacilityCoverage],
     labels: dict[str, str],

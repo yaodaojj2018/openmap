@@ -97,6 +97,40 @@ class TimeField:
                 out.append(RayRadius(theta, extrapolated, RayStatus.EXTRAPOLATED))
         return out
 
+    def scatter(
+        self, extrapolate_to_m: float | None = None
+    ) -> tuple[list[tuple[float, float]], list[float]]:
+        """可达样本散点（米制坐标 + 秒数），供网格插值（docs/02 §3.1 阶段 C 第二法）。
+
+        extrapolate_to_m 给定时，为「最远可达半径之外」的方向补一个该半径处的
+        虚拟散点，取值沿用 _time_at 的封顶 1.3× 外推口径——否则快方向（级别圈
+        落在最远探针之外）的等值线落在网格外无法闭合，第二法直接失效。
+        阻挡方向不外推：那不是采样不足，而是真实不可达，虚构会抹平凹陷。
+        """
+        points: list[tuple[float, float]] = []
+        times: list[float] = []
+        for theta in sorted(self._rays):
+            ray = self._rays[theta]
+            for radius, duration in sorted(ray.items()):
+                if duration is None:
+                    continue
+                points.append((radius * math.cos(theta), radius * math.sin(theta)))
+                times.append(duration)
+            reachable = self._reachable(theta)
+            if extrapolate_to_m is None or not reachable:
+                continue
+            if any(duration is None for duration in ray.values()):
+                continue
+            far_r, _ = reachable[-1]
+            if extrapolate_to_m > far_r:
+                extrapolated = self._time_at(theta, extrapolate_to_m)
+                if extrapolated is not None:
+                    points.append(
+                        (extrapolate_to_m * math.cos(theta), extrapolate_to_m * math.sin(theta))
+                    )
+                    times.append(extrapolated)
+        return points, times
+
     def estimate_seconds(self, origin: BD09Point, lng: float, lat: float) -> float | None:
         """任意点的步行秒数估算（覆盖判定二级漏斗，docs/02 §3.2）。
 

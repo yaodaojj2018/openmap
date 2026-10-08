@@ -17,6 +17,7 @@ class CoverageMethod(StrEnum):
     POLYGON = "polygon"  # 一级：几何粗筛，圈外定论（确定）
     FIELD = "field"  # 二级：时间场插值估算（置信度配置化，默认 0.8）
     MATRIX = "matrix"  # 三级：边缘带批量矩阵实测（确定）
+    WALKING = "walking"  # 三级降级：矩阵失败后逐条路径规划实测（确定，docs/02 §3.4）
 
 
 class FacilityCoverage(BaseModel):

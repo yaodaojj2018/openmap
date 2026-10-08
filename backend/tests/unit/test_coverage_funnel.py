@@ -13,6 +13,7 @@ from app.coverage.funnel import (
     build_polygon,
     classify_facilities,
     merge_matrix_verdicts,
+    merge_walking_verdicts,
     summarize_categories,
 )
 from app.mapapi.provider import BD09Point
@@ -167,3 +168,37 @@ def test_merge_matrix_row_count_mismatch_raises() -> None:
     verdicts, edge = classify([poi_at(100.0, 0.0, "a")], square_polygon(), lambda *_: 15.2 * 60)
     with pytest.raises(ValueError):
         merge_matrix_verdicts(verdicts, edge, [], THRESHOLD_S)
+
+
+def test_merge_walking_keeps_interpolation_for_failed_legs() -> None:
+    """降级链第二级（docs/02 §3.4）：实测条目按 WALKING 口径覆写；
+    None（规划失败/预算拦截）保留插值判定，不冒充实测。"""
+    records = [poi_at(100.0, 0.0, "ok"), poi_at(200.0, 0.0, "lost")]
+    verdicts, edge = classify(records, square_polygon(), lambda *_: 15.2 * 60)
+    assert sorted(edge) == [0, 1]
+    merged, measured = merge_walking_verdicts(
+        verdicts,
+        edge,
+        [RouteLeg(distance_m=800.0, duration_s=700.0), None],
+        THRESHOLD_S,
+    )
+    assert measured == 1
+    assert (merged[0].in_circle, merged[0].method, merged[0].confidence) == (
+        True,
+        CoverageMethod.WALKING,
+        1.0,
+    )
+    assert merged[1].method is CoverageMethod.FIELD, "失败条目保留插值口径"
+    assert merged[1].confidence == FIELD_CONF
+
+
+def test_merge_walking_unreachable_leg_settled_outside() -> None:
+    """逐条实测不可达：定论圈外（method=WALKING，与矩阵口径同为确定）。"""
+    verdicts, edge = classify([poi_at(100.0, 0.0, "a")], square_polygon(), lambda *_: 15.2 * 60)
+    merged, measured = merge_walking_verdicts(
+        verdicts, edge, [RouteLeg(distance_m=None, duration_s=None)], THRESHOLD_S
+    )
+    assert measured == 1
+    assert merged[0].in_circle is False
+    assert merged[0].est_walk_time_min is None
+    assert merged[0].method is CoverageMethod.WALKING

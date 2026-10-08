@@ -8,17 +8,23 @@ from __future__ import annotations
 import asyncio
 import time
 
+import httpx
 import pytest
+import respx
 from fastapi.testclient import TestClient
 
 from app.core.cache import MemoryCache
 from app.core.config import REPO_ROOT, Settings
+from app.core.coords import haversine_m, offset_lnglat
 from app.main import create_app
+from app.mapapi.baidu.client import BaiduClient
 from app.mapapi.provider import BD09Point, MapProvider
 from app.mapapi.replay.client import ReplayProvider
+from app.models.common import Coord
 from app.models.geocode import GeocodeCandidate
 from app.models.isochrone import RouteLeg
 from app.models.poi import PoiRecord
+from app.models.task import AnalysisParams, TaskStatus
 from app.tasks.manager import TaskManager
 
 ORIGIN = {"lng": 116.316628, "lat": 39.981909}
@@ -155,3 +161,79 @@ def test_analysis_result_conflict_while_running() -> None:
         resp = client.get(f"/api/v1/analyses/{task_id}/result")
         assert resp.status_code == 409
         assert resp.json()["detail"]["code"] == "TASK_NOT_COMPLETED"
+
+
+ROUTEMATRIX_URL = "https://api.map.baidu.com/routematrix/v2/walking"
+PLACE_URL = "https://api.map.baidu.com/place/v3/around"
+
+
+async def test_full_analysis_outbound_within_budget() -> None:
+    """M4 验收标志（docs/02 §6）：单次分析物理出站 HTTP ≤ 25 次。
+
+    真实 BaiduClient（限流/缓存/预算/熔断全链生效）+ respx 拦截三端点跑完整
+    pipeline：respx 拦截计数与 QuotaBudget.http_calls 双口径互证——计数若漏计
+    （如缓存命中误扣）或多计（如熔断快速失败仍占名额）两者立即背离。
+    mock 模型与回放一致（直线 × 1.3 ÷ 1.35 m/s），几何健康、双法一致、无降级。
+    """
+    settings = Settings()  # 真实模式（非 demo）：预算护栏全程生效
+    provider = BaiduClient(settings)
+
+    def matrix_side(request: httpx.Request) -> httpx.Response:
+        """按请求 OD 动态生成等长 rows：距离 = 直线×1.3，耗时 = 距离÷1.35 m/s。"""
+        o_lat, o_lng = (float(v) for v in request.url.params["origins"].split("|")[0].split(","))
+        rows = []
+        for pair in request.url.params["destinations"].split("|"):
+            lat, lng = (float(v) for v in pair.split(","))
+            distance = haversine_m(o_lng, o_lat, lng, lat) * 1.3
+            rows.append(
+                {
+                    "distance": {"value": round(distance, 1)},
+                    "duration": {"value": round(distance / 1.35, 1)},
+                }
+            )
+        return httpx.Response(200, json={"status": 0, "result": rows})
+
+    def poi_side(request: httpx.Request) -> httpx.Response:
+        """每类 1 条即末页（1 < page_size 不再翻页）；名含类目关键词过白名单。
+
+        位置取 830 m：步行 ≈ 13.3 min，落入边缘带 [T±2min] → 触发覆盖精判矩阵，
+        让三级漏斗的 API 消耗也计入验收口径。
+        """
+        query = request.url.params["query"]
+        lng, lat = offset_lnglat(ORIGIN["lng"], ORIGIN["lat"], 830.0, 0.0)
+        return httpx.Response(
+            200,
+            json={
+                "status": 0,
+                "results": [
+                    {
+                        "uid": f"budget-{query}",
+                        "name": f"模拟{query}",
+                        "location": {"lng": lng, "lat": lat},
+                        "address": "预算验收模拟点",
+                    }
+                ],
+            },
+        )
+
+    with respx.mock:
+        matrix_route = respx.get(ROUTEMATRIX_URL).mock(side_effect=matrix_side)
+        place_route = respx.get(PLACE_URL).mock(side_effect=poi_side)
+        mgr = TaskManager(provider, settings, MemoryCache())
+        task = await mgr.create(AnalysisParams(origin=Coord(**ORIGIN)))
+
+        final = await mgr.join(task.task_id)
+        await provider.close()
+
+    assert final is not None and final.status is TaskStatus.completed
+    assert final.degraded_flags == [], "全链路健康路径不应产生降级标记"
+
+    outbound = matrix_route.call_count + place_route.call_count
+    stats = final.api_call_stats
+    assert stats["http_calls"] == outbound, "预算计数必须与物理拦截一致（双口径互证）"
+    assert stats["http_calls"] <= 25, f"M4 验收：单次分析出站 ≤ 25 次，实测 {stats['http_calls']}"
+    assert stats["cache_hits"] == 0 and stats["retries"] == 0, "首发全量出站：无缓存无重试"
+
+    report = await mgr.result(task.task_id)
+    assert report is not None
+    assert report.isochrone.degraded_reason is None

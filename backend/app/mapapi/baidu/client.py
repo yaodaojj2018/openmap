@@ -1,7 +1,8 @@
 """百度地图 Web 服务 API 适配器。
 
-限流/重试/缓存/SN 签名全部收口在此（CLAUDE.md 铁律 #3）：
+限流/重试/熔断/缓存/SN 签名全部收口在此（CLAUDE.md 铁律 #3）：
 - 令牌桶按配置限速，排队不丢弃；
+- 连续瞬时失败达阈值熔断，打开期内未命中缓存的请求快速失败（零出站）；
 - 仅对 TIMEOUT / SERVER / RATE_LIMIT 指数退避重试；
 - 成功响应整体缓存（key 由参数规范化生成）；
 - status 码分类默认表以官方文档常见口径为准，可用 OPENMAP_STATUS_KIND_OVERRIDES 覆盖。
@@ -18,11 +19,14 @@ import httpx
 import structlog
 from tenacity import (
     AsyncRetrying,
+    RetryCallState,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
 
+from app.core.breaker import CircuitBreaker
+from app.core.budget import BudgetExceeded, current_budget
 from app.core.cache import CacheBackend, MemoryCache, cache_key
 from app.core.config import Settings
 from app.core.ratelimit import TokenBucket
@@ -58,6 +62,7 @@ class BaiduClient:
         self._log = structlog.get_logger(__name__)
         self._cache = cache or MemoryCache()
         self._bucket = TokenBucket(settings.api_qps, settings.api_burst)
+        self._breaker = CircuitBreaker(settings.breaker_fail_threshold, settings.breaker_open_s)
         self._client = httpx.AsyncClient(base_url=_BASE_URL, timeout=settings.http_timeout_s)
         overrides = {int(k): ErrorKind(v) for k, v in settings.status_kind_overrides.items()}
         self._status_kind = _DEFAULT_STATUS_KIND | overrides
@@ -71,7 +76,10 @@ class BaiduClient:
         return hashlib.md5((raw + self._s.baidu_sk).encode()).hexdigest()
 
     async def _request(self, path: str, params: dict[str, str]) -> dict[str, Any]:
-        """单次请求：限流 → 缓存 → HTTP → status 分类。返回已缓存或新响应 JSON。"""
+        """单次请求：缓存 → 预算 → 熔断 → 限流 → HTTP → status 分类。
+
+        缓存命中与熔断快速失败零出站：不占预算、不构成故障证据（docs/02 §3.4）。
+        """
         request_params = {**params, "output": "json", "ak": self._s.baidu_ak}
         if self._s.baidu_sk:
             request_params["sn"] = self._calc_sn(path, request_params)
@@ -79,9 +87,32 @@ class BaiduClient:
         key = cache_key("baidu", path=path, **params)
         cached = await self._cache.get(key)
         if cached is not None:
+            budget = current_budget()
+            if budget is not None:
+                budget.record_cache_hit()
             return json.loads(cached)
 
-        await self._bucket.acquire()
+        try:
+            _charge_budget()
+            if not self._breaker.allow():
+                raise MapApiError(ErrorKind.BREAKER_OPEN, "熔断打开中，快速失败")
+            await self._bucket.acquire()
+            data = await self._roundtrip(path, key, request_params)
+        except MapApiError as exc:
+            # 仅瞬时错误计入熔断；BUDGET_EXCEEDED/BREAKER_OPEN 为本地拦截，非上游故障
+            if exc.kind in RETRYABLE_KINDS:
+                self._breaker.record_failure()
+            raise
+        finally:
+            # 探针请求若被取消/被预算拦截（未走到 record_*），释放半开名额防卡死
+            self._breaker.abandon_probe()
+        self._breaker.record_success()
+        return data
+
+    async def _roundtrip(
+        self, path: str, key: str, request_params: dict[str, str]
+    ) -> dict[str, Any]:
+        """单次出站 HTTP：状态码分类 → JSON 解析 → 百度 status 分类 → 写缓存。"""
         try:
             resp = await self._client.get(path, params=request_params)
         except httpx.TimeoutException as exc:
@@ -113,6 +144,7 @@ class BaiduClient:
             stop=stop_after_attempt(self._s.retry_max_attempts),
             wait=wait_exponential(multiplier=self._s.retry_backoff_s),
             retry=retry_if_exception(_is_retryable),
+            before_sleep=_count_retry,
             reraise=True,
         ):
             with attempt:
@@ -238,6 +270,29 @@ class BaiduClient:
                 )
         return legs
 
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        """direction/v2/walking 单对规划（降级链中间级，docs/02 §3.4）。
+
+        响应 result.routes[0] 的 distance/duration 为裸数值（与 routematrix 的
+        {value:} 包装不同）；解析兼容两种形态——降级链本身是对故障容错的位置，
+        不为格式细节二次抛错（格式若有出入按 BF-004 流程实测修正）。
+        无路线返回不可达 Leg。
+        """
+        data = await self.request(
+            "/direction/v2/walking",
+            {
+                "origin": _fmt_points([origin]),
+                "destination": _fmt_points([destination]),
+            },
+        )
+        routes = (data.get("result") or {}).get("routes") or []
+        if not routes:
+            return RouteLeg(distance_m=None, duration_s=None)
+        return RouteLeg(
+            distance_m=_scalar(routes[0].get("distance")),
+            duration_s=_scalar(routes[0].get("duration")),
+        )
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -246,3 +301,29 @@ def _fmt_points(points: list[BD09Point]) -> str:
     """routematrix 坐标串格式：lat,lng|lat,lng（该接口纬度在前，与 place v2 相反；
     传反会得到 status=2 参数非法，已实测）。"""
     return "|".join(f"{lat:.6f},{lng:.6f}" for lng, lat in points)
+
+
+def _scalar(value: Any) -> float | None:
+    """direction/routematrix 两代响应的数值提取：裸数值或 {value: x} 包装。"""
+    if isinstance(value, dict):
+        value = value.get("value")
+    return float(value) if value is not None else None
+
+
+def _charge_budget() -> None:
+    """出站前占用预算名额；无作用域（独立路由/测试直连）时跳过。"""
+    budget = current_budget()
+    if budget is not None:
+        try:
+            budget.acquire()
+        except BudgetExceeded as exc:
+            raise MapApiError(
+                ErrorKind.BUDGET_EXCEEDED, f"单次分析出站预算耗尽（上限 {exc.max_calls} 次）"
+            ) from exc
+
+
+def _count_retry(state: RetryCallState) -> None:
+    """tenacity before_sleep 钩子：重试调度计数（docs/02 §7.5 重试开销统计）。"""
+    budget = current_budget()
+    if budget is not None:
+        budget.record_retry()

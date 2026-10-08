@@ -18,6 +18,7 @@ dependencies = [
   "tenacity>=8.2",
   "shapely>=2.0",
   "scipy>=1.11",
+  "numpy>=1.26",
 ]
 
 [project.optional-dependencies]

@@ -1,9 +1,12 @@
 """百度适配器集成测试：respx mock 覆盖正常链路与异常矩阵（docs/02 §7.2）。"""
 
+import asyncio
+
 import httpx
 import pytest
 import respx
 
+from app.core.budget import budget_scope
 from app.core.cache import MemoryCache
 from app.core.config import Settings
 from app.mapapi.baidu.client import BaiduClient
@@ -12,6 +15,7 @@ from app.mapapi.provider import ErrorKind, MapApiError
 GEOCODE_URL = "https://api.map.baidu.com/geocoding/v3/"
 PLACE_URL = "https://api.map.baidu.com/place/v3/around"
 ROUTEMATRIX_URL = "https://api.map.baidu.com/routematrix/v2/walking"
+WALKING_URL = "https://api.map.baidu.com/direction/v2/walking"
 
 
 def make_client(**overrides: object) -> BaiduClient:
@@ -207,4 +211,165 @@ async def test_route_matrix_truncated_rows_raise() -> None:
         with pytest.raises(MapApiError) as exc_info:
             await client.route_matrix((116.316628, 39.981909), dests)
         assert exc_info.value.kind == ErrorKind.SERVER
+        await client.close()
+
+
+# ---- 熔断（docs/02 §3.4：连续瞬时失败 → 打开期内快速失败，零出站）----
+
+
+async def test_breaker_opens_and_fast_fails_without_http() -> None:
+    """连续瞬时失败达阈值 → 熔断打开：后续请求快速失败且不再出站、不触发重试。"""
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(side_effect=httpx.ReadTimeout("mock timeout"))
+        client = make_client(breaker_fail_threshold=4, breaker_open_s=60.0)
+        with pytest.raises(MapApiError) as first:
+            await client.geocode("地址A")  # 3 次重试耗尽 → TIMEOUT；熔断计 3 次仍闭合
+        assert first.value.kind == ErrorKind.TIMEOUT
+        assert route.call_count == 3
+        with pytest.raises(MapApiError) as second:
+            await client.geocode("地址B")  # 第 4 次失败打开；重试第 5 次尝试被快速失败
+        assert second.value.kind == ErrorKind.BREAKER_OPEN
+        assert route.call_count == 4
+        with pytest.raises(MapApiError) as third:
+            await client.geocode("地址C")  # 打开期：零出站
+        assert third.value.kind == ErrorKind.BREAKER_OPEN
+        assert route.call_count == 4
+        await client.close()
+
+
+async def test_breaker_open_still_serves_cache() -> None:
+    """熔断只挡出站：缓存命中照常返回（零出站不构成故障证据）。"""
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(
+            side_effect=[
+                httpx.Response(200, json=geocode_payload()),
+                httpx.ReadTimeout("mock timeout"),
+                httpx.ReadTimeout("mock timeout"),
+            ]
+        )
+        client = make_client(breaker_fail_threshold=2, breaker_open_s=60.0)
+        assert len(await client.geocode("地址A")) == 1  # 成功并写缓存
+        with pytest.raises(MapApiError) as exc_info:
+            await client.geocode("地址B")  # 2 次失败 → 打开，第 3 次尝试快速失败
+        assert exc_info.value.kind == ErrorKind.BREAKER_OPEN
+        assert route.call_count == 3
+        candidates = await client.geocode("地址A")  # 缓存命中，不受熔断影响
+        assert len(candidates) == 1
+        assert route.call_count == 3
+        await client.close()
+
+
+async def test_breaker_half_open_probe_recovers() -> None:
+    """打开到期后半开放单探针，成功即闭合恢复出站。"""
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(
+            side_effect=[
+                httpx.ReadTimeout("mock timeout"),
+                httpx.ReadTimeout("mock timeout"),
+                httpx.Response(200, json=geocode_payload()),
+            ]
+        )
+        client = make_client(breaker_fail_threshold=2, breaker_open_s=0.01)
+        with pytest.raises(MapApiError):
+            await client.geocode("地址A")  # 打开
+        await asyncio.sleep(0.02)  # 越过 open_s（httpx 路径无法注入假时钟，真实微等待）
+        candidates = await client.geocode("地址C")  # 未缓存 → 半开探针
+        assert len(candidates) == 1
+        assert route.call_count == 3
+        await client.close()
+
+
+# ---- 逐条步行规划（docs/02 §3.4 降级链第二级）----
+
+
+async def test_walking_route_parses_bare_numbers() -> None:
+    """direction/v2/walking：routes[0] 裸数值口径 + 坐标串 纬度,经度。"""
+    with respx.mock:
+        route = respx.get(WALKING_URL).mock(
+            return_value=httpx.Response(
+                200, json={"status": 0, "result": {"routes": [{"distance": 1234, "duration": 910}]}}
+            )
+        )
+        client = make_client()
+        leg = await client.walking_route((116.316628, 39.981909), (116.326628, 39.981909))
+        assert (leg.distance_m, leg.duration_s) == (1234.0, 910.0)
+        params = route.calls[0].request.url.params
+        assert params["origin"] == "39.981909,116.316628"
+        assert params["destination"] == "39.981909,116.326628"
+        await client.close()
+
+
+async def test_walking_route_accepts_value_wrapper_and_unreachable() -> None:
+    """兼容 {value:} 包装形态（与 routematrix 同构）；无路线返回不可达 Leg。"""
+    with respx.mock:
+        respx.get(WALKING_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"status": 0, "result": {"routes": [{"distance": {"value": 500}}]}},
+            )
+        )
+        client = make_client()
+        leg = await client.walking_route((116.316628, 39.981909), (116.326628, 39.981909))
+        assert leg.distance_m == 500.0
+        assert leg.duration_s is None  # 缺 duration 字段不虚构耗时
+        assert leg.reachable is False
+        await client.close()
+
+        respx.get(WALKING_URL).mock(
+            return_value=httpx.Response(200, json={"status": 0, "result": {"routes": []}})
+        )
+        client2 = make_client()
+        empty = await client2.walking_route((116.316628, 39.981909), (116.326628, 39.981909))
+        assert (empty.distance_m, empty.duration_s) == (None, None)
+        await client2.close()
+
+
+# ---- QuotaBudget（docs/02 §3.4：单次分析出站 HTTP 硬上限）----
+
+
+async def test_budget_blocks_outbound_beyond_limit() -> None:
+    """预算耗尽 → BUDGET_EXCEEDED（本地拦截不可重试，立即抛出），此后零出站。"""
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(side_effect=httpx.ReadTimeout("mock timeout"))
+        client = make_client()
+        with budget_scope(2) as budget:
+            with pytest.raises(MapApiError) as exc_info:
+                await client.geocode("地址A")  # 2 次出站后，第 3 次尝试被护栏拦截
+            assert exc_info.value.kind == ErrorKind.BUDGET_EXCEEDED
+            assert route.call_count == 2
+            assert budget.http_calls == 2
+        await client.close()
+
+
+async def test_budget_cache_hit_not_charged() -> None:
+    """缓存命中零出站：不占预算名额，仅计入命中率统计。"""
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(
+            return_value=httpx.Response(200, json=geocode_payload())
+        )
+        client = make_client()
+        with budget_scope(1) as budget:
+            await client.geocode("地址A")
+            await client.geocode("地址A")  # 缓存命中
+            assert budget.http_calls == 1
+            assert budget.cache_hits == 1
+            with pytest.raises(MapApiError) as exc_info:
+                await client.geocode("地址B")  # 新参数需出站，预算已满
+            assert exc_info.value.kind == ErrorKind.BUDGET_EXCEEDED
+            assert route.call_count == 1
+        await client.close()
+
+
+async def test_budget_counts_retry_outbound() -> None:
+    """重试同样消耗出站名额：3 次物理出站 = 1 次首试 + 2 次重试调度。"""
+    with respx.mock:
+        route = respx.get(GEOCODE_URL).mock(side_effect=httpx.ReadTimeout("mock timeout"))
+        client = make_client()
+        with budget_scope(3) as budget:
+            with pytest.raises(MapApiError) as exc_info:
+                await client.geocode("地址A")  # 默认重试上限 3 次全部耗尽
+            assert exc_info.value.kind == ErrorKind.TIMEOUT
+            assert budget.http_calls == 3
+            assert budget.retries == 2
+            assert route.call_count == 3
         await client.close()

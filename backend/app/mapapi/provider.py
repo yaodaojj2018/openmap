@@ -25,6 +25,8 @@ class ErrorKind(StrEnum):
     BAD_REQUEST = "BAD_REQUEST"  # 参数错误，不可重试
     NO_RESULT = "NO_RESULT"  # 语义上无结果（非错误）
     UNKNOWN = "UNKNOWN"  # 未归类
+    BREAKER_OPEN = "BREAKER_OPEN"  # 熔断打开本地快速失败（非上游错误，不可重试）
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"  # 本地单次分析预算护栏触发（非上游错误，不可重试）
 
 
 RETRYABLE_KINDS = frozenset({ErrorKind.TIMEOUT, ErrorKind.SERVER, ErrorKind.RATE_LIMIT})
@@ -67,6 +69,16 @@ class MapProvider(Protocol):
 
         返回顺序与 destinations 一一对应；不可达目的地返回 distance/duration 为 None 的 Leg。
         实现方负责按批量上限分批（铁律 #7：能用批量不逐条）。
+        """
+        ...
+
+    async def walking_route(self, origin: BD09Point, destination: BD09Point) -> RouteLeg:
+        """单对 OD 步行路线测距测时（降级链中间级，docs/02 §3.4）。
+
+        端点与批量矩阵相互独立：矩阵故障时按条回退到此，仍拿路网实测口径。
+        仅覆盖判定边缘带使用（≤ verify_limit 条）；等时圈 64 探针不走此层
+        （逐条会爆预算，直接落第三级直线估算）。
+        无路线时返回 distance/duration 为 None 的 Leg。
         """
         ...
 
