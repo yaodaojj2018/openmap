@@ -76,6 +76,19 @@ class Settings(BaseSettings):
     isochrone_refine_rounds: int = 3  # 并行二分轮数（区间收敛至 ~50m）
     isochrone_levels_min: list[int] = [5, 10, 15]  # 输出的等时圈级别
 
+    # ---- 覆盖判定三级漏斗（docs/02 §3.2）----
+    coverage_edge_band_min: float = 2.0  # 边缘带半宽：t̂ ∈ [T±band] 触发矩阵精判
+    coverage_matrix_verify_limit: int = 30  # 三级漏斗 API 上限：超出的设施按插值口径收尾
+    coverage_sufficient_count: int = 5  # 类目"数量充足"阈值（评分公式，见 models/coverage.py）
+    coverage_field_confidence: float = 0.8  # 时间场插值口径的置信度标注
+
+    # ---- 盲区识别（docs/02 §3.3，全本地零 API）----
+    blindspot_extent_m: int = 1500  # 研究区域边长（1.5km × 1.5km）
+    blindspot_cell_m: int = 100  # 栅格分辨率（米）
+    blindspot_threshold_m: int = 1000  # 距设施超此值判缺失（命题口径 1km）
+    blindspot_buffer_m: float = 50.0  # 缺失栅格聚合平滑缓冲（8 邻接融合）
+    blindspot_types: list[str] = ["medical", "education", "shopping"]  # 参与判定的关键设施类目
+
     # ---- 分析任务（docs/02 §5.2）----
     task_ttl_s: int = 24 * 3600  # 任务状态/报告持久化 TTL（Redis 场景跨重启可恢复）
 

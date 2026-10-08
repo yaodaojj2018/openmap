@@ -7,12 +7,18 @@
 
 from __future__ import annotations
 
+import bisect
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import pairwise
 
+from app.core.coords import local_delta_m
 from app.isochrone.sampler import Probe, direction_angles
+from app.mapapi.provider import BD09Point
 from app.models.isochrone import RouteLeg
+
+_TAU = 2 * math.pi
 
 
 class RayStatus(StrEnum):
@@ -90,6 +96,54 @@ class TimeField:
                 extrapolated = min(far_r * level_s / far_t, far_r * 1.3)
                 out.append(RayRadius(theta, extrapolated, RayStatus.EXTRAPOLATED))
         return out
+
+    def estimate_seconds(self, origin: BD09Point, lng: float, lat: float) -> float | None:
+        """任意点的步行秒数估算（覆盖判定二级漏斗，docs/02 §3.2）。
+
+        口径：定位到包围该点方位角的两条相邻射线，各自按半径线性插值/外推
+        （封顶 1.3×，与 level_radius 同源），再做角度线性加权。
+        阻挡方向（该半径之前已有不可达探针）或全程无样本返回 None——
+        由调用方归入边缘带矩阵精判，不用插值口径冒充结论。
+        """
+        thetas = sorted(self._rays)
+        if not thetas:
+            return None
+        dx_m, dy_m = local_delta_m(origin[0], origin[1], lng, lat)
+        radius = math.hypot(dx_m, dy_m)
+        if radius <= 0.0:
+            return 0.0
+
+        theta = math.atan2(dy_m, dx_m) % _TAU
+        lo = thetas[bisect.bisect_right(thetas, theta) - 1]  # -1 回绕到最后一条射线
+        hi = thetas[0] if lo == thetas[-1] else thetas[bisect.bisect_right(thetas, theta)]
+        span = (hi - lo) % _TAU or _TAU
+        weight = ((theta - lo) % _TAU) / span
+
+        t_lo = self._time_at(lo, radius)
+        t_hi = self._time_at(hi, radius)
+        if t_lo is None or t_hi is None:
+            # 任一相邻射线在该半径阻挡/无样本：该方位的插值失去依据，
+            # 取另一侧全值属于用插值口径冒充结论——返回 None 交边缘带矩阵精判
+            return None
+        return t_lo + (t_hi - t_lo) * weight
+
+    def _time_at(self, theta: float, radius: float) -> float | None:
+        """单射线上给定半径的秒数：区间插值 / 原点插值 / 外推（封顶 1.3×）。"""
+        ray = self._rays[theta]
+        if any(r <= radius for r, t in ray.items() if t is None):
+            return None  # 半径之内存在不可达探针：阻挡，不做插值冒充
+        reachable = self._reachable(theta)
+        if not reachable:
+            return None
+        first_r, first_t = reachable[0]
+        if radius <= first_r:
+            return first_t * radius / first_r
+        for (r1, t1), (r2, t2) in pairwise(reachable):
+            if r1 <= radius <= r2:
+                ratio = (radius - r1) / (r2 - r1) if r2 > r1 else 1.0
+                return t1 + ratio * (t2 - t1)
+        far_r, far_t = reachable[-1]
+        return min(far_t * radius / far_r, far_t * 1.3)
 
     @staticmethod
     def _interp_crossing(

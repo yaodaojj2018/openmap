@@ -12,19 +12,26 @@ from typing import Protocol
 
 import structlog
 
+from app.blindspot.grid import compute_blindspot
 from app.core.config import Settings
+from app.coverage.funnel import (
+    build_polygon,
+    classify_facilities,
+    merge_matrix_verdicts,
+    summarize_categories,
+)
 from app.isochrone.engine import compute_isochrone
 from app.mapapi.provider import BD09Point, MapApiError, MapProvider
 from app.models.common import Coord
+from app.models.coverage import CoverageResult
 from app.models.geocode import GeocodeCandidate
-from app.models.isochrone import IsochroneResult, RouteLeg
+from app.models.isochrone import RouteLeg
 from app.models.poi import PoiRecord, PoiSearchResult
 from app.models.report import AnalysisReport
 from app.models.task import AnalysisParams, TaskStage
 from app.poi.service import load_taxonomy, search_categories
 
-# 各阶段的全局进度窗口（docs/02 §5.1：等时圈 30%→70%、POI 70%→85%……）。
-# coverage/blindspot 窗口先行登记，M3 后续阶段接入编排时即生效。
+# 各阶段的全局进度窗口（docs/02 §5.1：等时圈 30%→70%、POI 70%→85%、覆盖 85%→92%、盲区 92%→97%）。
 STAGE_WINDOWS: dict[TaskStage, tuple[float, float]] = {
     TaskStage.resolving: (0.02, 0.30),
     TaskStage.sampling: (0.30, 0.58),
@@ -121,13 +128,15 @@ async def run_analysis(
         lo, hi = STAGE_WINDOWS[TaskStage(stage_name)]
         await reporter.on_progress(lo + (hi - lo) * max(0.0, min(frac, 1.0)))
 
-    isochrone: IsochroneResult = await compute_isochrone(
+    computation = await compute_isochrone(
         counting,
         settings,
         origin_bd09,
         resolve_levels(params.minutes, settings),
         on_progress=engine_hook,
     )
+    isochrone = computation.result
+    time_field = computation.field
 
     # ③ poi：逐类目隔离失败——单类目不可用记降级标记，不拖垮整体。
     #    逐 key 调用 search_categories（其内部即单协程 gather），失败面收敛到单类目。
@@ -143,9 +152,12 @@ async def run_analysis(
         return_exceptions=True,
     )
     facilities: dict[str, list[PoiRecord]] = {}
+    # 检索失败的类目：盲区不评估、评分不计入——"没有数据"不能被下游当成事实结论
+    failed_keys: set[str] = set()
     for key, outcome in zip(params.categories, per_category, strict=True):
         if isinstance(outcome, MapApiError):
             degraded.append(f"poi:{key}:unavailable")
+            failed_keys.add(key)
             facilities[key] = []
             log.warning(
                 "analysis.poi_degraded", task_id=task_id, category=key, kind=outcome.kind.value
@@ -155,6 +167,81 @@ async def run_analysis(
         else:
             facilities.update(outcome)
     await reporter.on_progress(STAGE_WINDOWS[TaskStage.poi][1])
+
+    # ④ coverage：三级漏斗——几何粗筛 → 时间场插值 → 边缘带批量矩阵精判（docs/02 §3.2）。
+    #    精判是漏斗中唯一 API 消耗点（≤ verify_limit 个设施，1 次批量矩阵）。
+    await reporter.on_stage(TaskStage.coverage)
+    labels: dict[str, str] = {spec.key: spec.label for spec in taxonomy}
+    threshold_s = params.minutes * 60
+    band_s = settings.coverage_edge_band_min * 60
+    flat_records = [rec for key in params.categories for rec in facilities.get(key, [])]
+
+    def _estimate(lng: float, lat: float) -> float | None:
+        return time_field.estimate_seconds(origin_bd09, lng, lat)
+
+    verdicts, edge_indices = classify_facilities(
+        flat_records,
+        build_polygon(isochrone.levels[-1].coordinates),
+        _estimate,
+        threshold_s,
+        threshold_s - band_s,
+        threshold_s + band_s,
+        settings.coverage_field_confidence,
+    )
+    verified = 0
+    if edge_indices:
+        chosen = edge_indices[: settings.coverage_matrix_verify_limit]
+        destinations = [(flat_records[i].lng, flat_records[i].lat) for i in chosen]
+        try:
+            # 分批收口在适配器（client.route_matrix 内部按 matrix_batch_size 切批），
+            # 编排层一次逻辑调用交付全部目的地——api_call_stats 与等时圈口径一致
+            legs = await counting.route_matrix(origin_bd09, destinations)
+            verdicts = merge_matrix_verdicts(verdicts, chosen, legs, threshold_s)
+            verified = len(chosen)
+        except (MapApiError, ValueError) as exc:
+            # 精判失败不拖垮报告：保留插值口径判定并降级标记（docs/02 §3.4 降级链）。
+            # ValueError 兜底：Provider 违反 1:1 返回契约（响应缺行）时 merge 的
+            # zip(strict) 抛错——本阶段的承诺是"精判可失败"，失败面不得击穿整体。
+            degraded.append("coverage:matrix:unavailable")
+            kind = exc.kind.value if isinstance(exc, MapApiError) else "CONTRACT_VIOLATION"
+            log.warning("analysis.coverage_matrix_degraded", task_id=task_id, kind=kind)
+    coverage = CoverageResult(
+        threshold_min=params.minutes,
+        facilities=verdicts,
+        categories=summarize_categories(
+            verdicts,
+            {key: labels.get(key, key) for key in params.categories},
+            settings.coverage_sufficient_count,
+        ),
+        verified_count=verified,
+    )
+    await reporter.on_progress(STAGE_WINDOWS[TaskStage.coverage][1])
+
+    # ⑤ blindspot：栅格 + cKDTree + 聚合平滑，全本地零 API（docs/02 §3.3）。
+    #    只评估"本次实际检索成功"的类目：未选择/检索失败的类目没有数据，而空设施
+    #    列表在栅格语义下是"真实无设施 → 全域缺失"——混入即把数据缺失冒充盲区事实。
+    await reporter.on_stage(TaskStage.blindspot)
+    searched_keys = set(params.categories) - failed_keys
+    blindspot = compute_blindspot(
+        origin_bd09,
+        facilities,
+        settings,
+        labels,
+        types=[t for t in settings.blindspot_types if t in searched_keys],
+    )
+    await reporter.on_progress(STAGE_WINDOWS[TaskStage.blindspot][1])
+
+    # 综合评分 = 类目覆盖评分等权平均（公式与口径见 AnalysisReport.overall_score 描述）。
+    # 检索失败类目的 0 分是数据缺失而非社区质量，不计入平均；
+    # summarize 按 labels（= params.categories 序）产出，strict zip 保证对位。
+    category_scores = [
+        c.score
+        for key, c in zip(params.categories, coverage.categories, strict=True)
+        if key not in failed_keys
+    ]
+    overall_score: float | None = (
+        round(sum(category_scores) / len(category_scores), 1) if category_scores else None
+    )
 
     origin_coord = Coord(lng=origin_bd09[0], lat=origin_bd09[1], crs="bd09")
     return AnalysisReport(
@@ -167,6 +254,9 @@ async def run_analysis(
             radius_m=settings.poi_search_radius_m,
             categories=facilities,
         ),
+        coverage=coverage,
+        blindspot=blindspot,
+        overall_score=overall_score,
         degraded_flags=degraded,
         api_call_stats=dict(counting.counts),
         generated_at=datetime.now(UTC),

@@ -32,7 +32,7 @@ jobs:
         run: pytest -m smoke -q
       - name: 全量测试 + 域层覆盖率门禁（docs/regression-ci.md §3）
         run: >-
-          pytest -q --cov=app.isochrone --cov=app.poi
+          pytest -q --cov=app.isochrone --cov=app.poi --cov=app.coverage --cov=app.blindspot
           --cov-fail-under=95 --cov-report=term --junitxml=pytest.xml
       - name: 测试与覆盖率写入 Job Summary
         if: always()

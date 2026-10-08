@@ -101,3 +101,23 @@ def haversine_m(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
         + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin(dlng / 2) ** 2
     )
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+def local_delta_m(lng1: float, lat1: float, lng2: float, lat2: float) -> tuple[float, float]:
+    """局部平面投影：点 2 相对点 1 的位移（东向/北向，米）。
+
+    与 sampler/replay 的米空间方位角约定同源（M_PER_DEG × cos 纬度），
+    供盲区栅格布设与时间场点位反解使用；1.5km 量级误差 < 0.1%。
+    """
+    return (
+        (lng2 - lng1) * M_PER_DEG * math.cos(math.radians(lat1)),
+        (lat2 - lat1) * M_PER_DEG,
+    )
+
+
+def offset_lnglat(lng: float, lat: float, dx_m: float, dy_m: float) -> LngLat:
+    """local_delta_m 的逆变换：给定点沿平面位移（东/北，米）后的经纬度。"""
+    return (
+        lng + dx_m / (M_PER_DEG * math.cos(math.radians(lat))),
+        lat + dy_m / M_PER_DEG,
+    )

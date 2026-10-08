@@ -131,6 +131,63 @@ def test_refine_brackets_skips_narrow_and_blocked() -> None:
     assert blocked.refine_brackets(950.0) == []
 
 
+# ---- TimeField.estimate_seconds（覆盖判定二级漏斗插值口径）----
+
+
+def test_estimate_seconds_on_ray_interpolates() -> None:
+    """点落在射线上：按半径沿线插值（相邻射线补样本——空/阻挡射线不再兜底取值）。"""
+    field = make_field(
+        {
+            0.0: {300.0: 300.0, 600.0: 600.0},
+            math.pi / 2: {300.0: 450.0, 600.0: 900.0},
+        }
+    )
+    lng, lat = offset_point(ORIGIN, 0.0, 450.0)
+    assert field.estimate_seconds(ORIGIN, lng, lat) == pytest.approx(450.0, rel=0.01)
+
+
+def test_estimate_seconds_blends_across_adjacent_rays() -> None:
+    """东向 1m/s、北向 2m/s：45° 方向点半插值 → (t̂东 + t̂北) / 2。"""
+    field = make_field(
+        {
+            0.0: {300.0: 300.0, 600.0: 600.0},
+            math.pi / 2: {300.0: 600.0, 600.0: 1200.0},
+        }
+    )
+    lng, lat = offset_point(ORIGIN, math.pi / 4, 450.0)
+    assert field.estimate_seconds(ORIGIN, lng, lat) == pytest.approx(675.0, rel=0.02)
+
+
+def test_estimate_seconds_blocked_beyond_barrier() -> None:
+    """600m 探针不可达：700m 点处于阻挡之外 → None（交给边缘带精判，不插值冒充）。"""
+    field = make_field({0.0: {300.0: 300.0, 600.0: None}})
+    lng, lat = offset_point(ORIGIN, 0.0, 700.0)
+    assert field.estimate_seconds(ORIGIN, lng, lat) is None
+
+
+@pytest.mark.regression
+def test_estimate_seconds_one_blocked_ray_returns_none() -> None:
+    """单侧相邻射线阻挡：返回 None 交边缘带精判，不得取另一侧全值冒充。
+
+    回归（BF-008）：东向 600m 不可达（河流）、东北向开放时，两射线之间
+    （22.5°）700m 点曾直接拿到东北向时间，以 0.8 置信度判圈内且永不进
+    矩阵精判——插值口径冒充了实测结论。
+    """
+    field = make_field(
+        {
+            0.0: {300.0: 300.0, 600.0: None},
+            math.pi / 2: {300.0: 600.0, 600.0: 1200.0},
+        }
+    )
+    lng, lat = offset_point(ORIGIN, math.pi / 8, 700.0)
+    assert field.estimate_seconds(ORIGIN, lng, lat) is None
+
+
+def test_estimate_seconds_origin_is_zero() -> None:
+    field = make_field({0.0: {300.0: 300.0}})
+    assert field.estimate_seconds(ORIGIN, ORIGIN[0], ORIGIN[1]) == 0.0
+
+
 # ---- fitter ----
 
 

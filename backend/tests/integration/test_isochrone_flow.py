@@ -17,7 +17,10 @@ def load_provider() -> ReplayProvider:
 
 
 async def test_engine_levels_geometry_and_budget() -> None:
-    result = await compute_isochrone(load_provider(), Settings(demo_mode=True), ORIGIN, [5, 10, 15])
+    computation = await compute_isochrone(
+        load_provider(), Settings(demo_mode=True), ORIGIN, [5, 10, 15]
+    )
+    result = computation.result
 
     assert [lv.level_min for lv in result.levels] == [5, 10, 15]
     areas = [lv.area_km2 for lv in result.levels]
@@ -40,7 +43,9 @@ async def test_engine_levels_geometry_and_budget() -> None:
 
 async def test_engine_blocked_direction_dent() -> None:
     """回放快照 157.5° 方向 cap=450（模拟河流）：15min 圈在该方向有明显凹陷。"""
-    result = await compute_isochrone(load_provider(), Settings(demo_mode=True), ORIGIN, [15])
+    result = (
+        await compute_isochrone(load_provider(), Settings(demo_mode=True), ORIGIN, [15])
+    ).result
     ring = result.levels[0].coordinates[0]
     dists = [haversine_m(ORIGIN[0], ORIGIN[1], lng, lat) for lng, lat in ring]
     # 凹陷方向边界贴近 300m 保守可达点；开阔方向超过 1000m

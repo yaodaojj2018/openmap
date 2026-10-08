@@ -86,6 +86,17 @@ def test_analysis_api_flow() -> None:
         assert [lv["level_min"] for lv in body["isochrone"]["levels"]] == [5, 10, 15]
         assert set(body["poi"]["categories"]) == {"medical", "education", "shopping", "elderly"}
         assert body["origin"]["crs"] == "bd09"
+        # M3：覆盖判定 + 盲区识别随报告产出
+        assert body["coverage"]["threshold_min"] == 15
+        assert len(body["coverage"]["categories"]) == 4
+        assert {t["type_key"] for t in body["blindspot"]["types"]} == {
+            "medical",
+            "education",
+            "shopping",
+        }
+        # 综合评分 = 类目评分等权平均（docs/02 §5.4 HealthReport.overall_score）
+        scores = [c["score"] for c in body["coverage"]["categories"]]
+        assert body["overall_score"] == round(sum(scores) / len(scores), 1)
 
         # 未知任务 / 非法参数
         assert client.get("/api/v1/analyses/unknown/status").status_code == 404

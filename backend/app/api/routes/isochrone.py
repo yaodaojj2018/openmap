@@ -40,7 +40,7 @@ async def isochrone(
     settings: Settings = request.app.state.settings
     levels = body.levels_min or settings.isochrone_levels_min
     try:
-        return await compute_isochrone(provider, settings, body.origin.to_bd09(), levels)
+        return (await compute_isochrone(provider, settings, body.origin.to_bd09(), levels)).result
     except IsochroneError as exc:
         raise HTTPException(
             status_code=422, detail={"code": "BAD_LEVELS", "message": str(exc)}

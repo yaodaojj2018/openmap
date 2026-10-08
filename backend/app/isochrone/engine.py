@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 import structlog
 
@@ -23,6 +24,18 @@ from app.models.isochrone import IsochroneLevel, IsochroneResult
 
 class IsochroneError(ValueError):
     """输入非法（levels 越界等），路由层据此映射 422。"""
+
+
+@dataclass(frozen=True)
+class IsochroneComputation:
+    """等时圈计算产物：响应模型 + 射线时间场。
+
+    时间场随结果一并返回，供覆盖判定二级漏斗复用（docs/02 §3.2"圈内点用
+    时间场直接插值"），避免为估算设施耗时重新采样。
+    """
+
+    result: IsochroneResult
+    field: TimeField
 
 
 ProgressHook = Callable[[str, float], Awaitable[None]]
@@ -44,7 +57,7 @@ async def compute_isochrone(
     origin: BD09Point,
     levels_min: list[int],
     on_progress: ProgressHook | None = None,
-) -> IsochroneResult:
+) -> IsochroneComputation:
     """计算多级步行等时圈（v1：射线插值 + 闭合样条，docs/02 §3.1）。
 
     on_progress 可选：阶段 A/B 进度以 "sampling" 上报、阶段 C 以 "fitting" 上报。
@@ -101,9 +114,12 @@ async def compute_isochrone(
         probes=field.probe_count,
         matrix_batches=batches,
     )
-    return IsochroneResult(
-        origin=Coord(lng=origin[0], lat=origin[1], crs="bd09"),
-        levels=out_levels,
-        probe_count=field.probe_count,
-        matrix_batches=batches,
+    return IsochroneComputation(
+        result=IsochroneResult(
+            origin=Coord(lng=origin[0], lat=origin[1], crs="bd09"),
+            levels=out_levels,
+            probe_count=field.probe_count,
+            matrix_batches=batches,
+        ),
+        field=field,
     )
