@@ -96,6 +96,60 @@ export interface TaskEvent {
   degraded_flags?: string[]
 }
 
+/** ---- 覆盖判定（docs/02 §3.2 三级漏斗，对齐 backend/app/models/coverage.py）---- */
+
+export type CoverageMethod = 'polygon' | 'field' | 'matrix'
+
+export interface FacilityCoverage {
+  uid: string
+  name: string
+  category: string
+  /** 估算/实测步行分钟；圈外、实测不可达或阻挡方向未估算为 null */
+  est_walk_time_min: number | null
+  in_circle: boolean
+  method: CoverageMethod
+  confidence: number
+}
+
+export interface CategoryCoverage {
+  category: string
+  label: string
+  total: number
+  reachable: number
+  coverage_ratio: number
+  avg_walk_time_min: number | null
+  score: number
+}
+
+export interface CoverageResult {
+  threshold_min: number
+  facilities: FacilityCoverage[]
+  categories: CategoryCoverage[]
+  verified_count: number
+}
+
+/** ---- 盲区识别（docs/02 §3.3，对齐 backend/app/models/blindspot.py）---- */
+
+export interface BlindspotTypeResult {
+  type_key: string
+  label: string
+  missing_cells: number
+  worst_distance_m: number | null
+  /** GeoJSON Polygon 环组：[外环, 内环...]（bd09），buffer 平滑后 */
+  polygons: number[][][][]
+}
+
+export interface BlindspotResult {
+  origin: { lng: number; lat: number; crs: Crs }
+  extent_m: number
+  cell_size_m: number
+  grid_side: number
+  threshold_m: number
+  types: BlindspotTypeResult[]
+  max_severity: number
+  severe_cells: number
+}
+
 /** 完整分析报告（对齐 backend/app/models/report.py；坐标 bd09） */
 export interface AnalysisReport {
   task_id: string
@@ -103,6 +157,11 @@ export interface AnalysisReport {
   minutes: number
   isochrone: IsochroneResult
   poi: PoiSearchResult
+  /** M3 接入；升级前的旧缓存报告可能缺省 */
+  coverage?: CoverageResult | null
+  blindspot?: BlindspotResult | null
+  /** 综合评分（0-100）= 类目覆盖评分等权平均（检索失败类目不计入）；旧缓存报告可能缺省 */
+  overall_score?: number | null
   degraded_flags: string[]
   api_call_stats: Record<string, number>
   generated_at: string

@@ -1,7 +1,8 @@
-/** 分析工作台状态（zustand）：中心点、类目选择、任务进度、POI 与等时圈结果。 */
+/** 分析工作台状态（zustand）：中心点、类目选择、任务进度、POI 与等时圈/完整报告。 */
 
 import { create } from 'zustand'
 import type {
+  AnalysisReport,
   CategoryKey,
   IsochroneResult,
   PoiRecord,
@@ -24,6 +25,8 @@ interface AnalysisState {
   isochrone: IsochroneResult | null
   isoLoading: boolean
   isoError: string | null
+  /** 完整分析报告（M3：图表与导出的数据源；由 useAnalysisTask 于任务完成时落档） */
+  report: AnalysisReport | null
   /** 异步任务态（docs/02 §5.2）：由 useAnalysisTask 驱动 */
   taskId: string | null
   taskStatus: TaskStatus | null
@@ -39,6 +42,7 @@ interface AnalysisState {
   setIsochrone: (result: IsochroneResult | null) => void
   setIsoLoading: (loading: boolean) => void
   setIsoError: (error: string | null) => void
+  setReport: (report: AnalysisReport | null) => void
   taskStarted: (taskId: string, status: TaskStatus, stage: TaskStage, progress: number) => void
   taskStageChanged: (stage: TaskStage, progress?: number) => void
   taskProgressed: (progress: number) => void
@@ -68,10 +72,11 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   isochrone: null,
   isoLoading: false,
   isoError: null,
+  report: null,
   ...TASK_DEFAULTS,
-  // 中心点变化即作废旧任务/等时圈/POI（数据只对当前中心点有效）
+  // 中心点变化即作废旧任务/等时圈/POI/报告（数据只对当前中心点有效）
   setOrigin: (origin, address) =>
-    set((s) => ({ origin, address: address ?? s.address, pois: {}, isochrone: null, ...TASK_DEFAULTS })),
+    set((s) => ({ origin, address: address ?? s.address, pois: {}, isochrone: null, report: null, ...TASK_DEFAULTS })),
   toggleCategory: (key) =>
     set((s) => ({
       selected: s.selected.includes(key)
@@ -84,6 +89,7 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   setIsochrone: (isochrone) => set({ isochrone, isoError: null }),
   setIsoLoading: (isoLoading) => set({ isoLoading }),
   setIsoError: (isoError) => set({ isoError }),
+  setReport: (report) => set({ report }),
   taskStarted: (taskId, taskStatus, taskStage, taskProgress) =>
     set({ taskId, taskStatus, taskStage, taskProgress, taskError: null, degradedFlags: [] }),
   taskStageChanged: (stage, progress) =>
@@ -105,6 +111,7 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
       poiError: null,
       isochrone: null,
       isoError: null,
+      report: null,
       ...TASK_DEFAULTS,
     }),
 }))

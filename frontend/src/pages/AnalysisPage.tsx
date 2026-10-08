@@ -1,9 +1,10 @@
 /**
- * 主工作台：左侧地图（点选中心点 / POI 打点 / 等时圈多边形），右侧控制面板
- * （地址搜索定位、类目选择、一键体检分析 + 进度、结果列表）。M3 在此扩展体检报告与图表。
+ * 主工作台：左侧地图（点选中心点 / POI 打点 / 等时圈多边形 / 盲区叠加），右侧控制面板
+ * （地址搜索定位、类目选择、一键体检分析 + 进度、结果列表）；体检完成后下方展开
+ * 完整报告（三件套图表 + 覆盖明细 + 盲区摘要 + 导出）。
  */
 
-import { useCallback, useState } from 'react'
+import { lazy, Suspense, useCallback, useState } from 'react'
 import {
   Alert,
   Button,
@@ -26,7 +27,11 @@ import MapCanvas from '../components/map/MapCanvas'
 import OriginMarker from '../components/map/OriginMarker'
 import PoiMarkers from '../components/map/PoiMarkers'
 import IsochroneLayer from '../components/map/IsochroneLayer'
+import BlindspotLayer from '../components/map/BlindspotLayer'
+// 报告面板懒加载（docs/02 §6 首屏 ≤2s）：echarts/html2canvas/jspdf 只随首份报告进场
+const ReportPanel = lazy(() => import('../components/report/ReportPanel'))
 import { CATEGORY_LIST } from '../constants/categories'
+import { formatDegradedFlags } from '../constants/degraded'
 import { fetchDemoHint, geocode } from '../api/geo'
 import { STAGE_LABELS, useAnalysisTask } from '../hooks/useAnalysisTask'
 import { useAnalysisStore } from '../stores/analysis'
@@ -46,6 +51,7 @@ export default function AnalysisPage() {
     isochrone,
     isoLoading,
     isoError,
+    report,
     taskStatus,
     taskStage,
     taskProgress,
@@ -88,7 +94,7 @@ export default function AnalysisPage() {
     [store],
   )
 
-  /** 一键体检分析：等时圈 → POI → （M3 后续：覆盖/盲区/报告）全流水线，SSE 进度 */
+  /** 一键体检分析：等时圈 → POI → 覆盖漏斗 → 盲区全流水线，SSE 进度，报告落 store */
   const runAnalysis = useCallback(async () => {
     const state = store.getState()
     if (!state.origin) {
@@ -127,7 +133,8 @@ export default function AnalysisPage() {
   const resultTabs = CATEGORY_LIST.filter((c) => pois[c.key]?.length)
 
   return (
-    <Row gutter={16}>
+    <>
+      <Row gutter={16}>
       <Col xs={24} lg={16}>
         <Card
           title="社区地图（点击地图选择体检中心点）"
@@ -142,6 +149,7 @@ export default function AnalysisPage() {
         >
           <MapCanvas ak={ak} center={{ lng: 116.316628, lat: 39.981909 }} onPick={onPick}>
             <IsochroneLayer />
+            <BlindspotLayer />
             <OriginMarker />
             <PoiMarkers />
           </MapCanvas>
@@ -240,7 +248,7 @@ export default function AnalysisPage() {
                 type="warning"
                 showIcon
                 style={{ marginTop: 12 }}
-                message={`部分数据降级：${degradedFlags.join('、')}（对应类目按 0 个计）`}
+                message={`部分数据降级：${formatDegradedFlags(degradedFlags)}`}
               />
             )}
           </Card>
@@ -304,6 +312,15 @@ export default function AnalysisPage() {
           </Card>
         </Space>
       </Col>
-    </Row>
+      </Row>
+
+      {report && (
+        <div style={{ marginTop: 16 }}>
+          <Suspense fallback={null}>
+            <ReportPanel report={report} />
+          </Suspense>
+        </div>
+      )}
+    </>
   )
 }

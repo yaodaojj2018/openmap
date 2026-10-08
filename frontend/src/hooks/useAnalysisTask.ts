@@ -58,6 +58,7 @@ export function useAnalysisTask() {
     const s = useAnalysisStore.getState()
     s.setIsochrone(report.isochrone)
     s.setPoiResult(report.poi.categories as Partial<Record<CategoryKey, PoiRecord[]>>)
+    s.setReport(report)
     useAnalysisStore.setState({ degradedFlags: report.degraded_flags })
     s.setIsoLoading(false)
     s.setPoiLoading(false)
