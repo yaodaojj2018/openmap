@@ -190,3 +190,21 @@ async def test_route_matrix_batches_by_limit() -> None:
         assert [leg.duration_s for leg in legs] == [60.0, 120.0, None]
         assert legs[2].reachable is False
         await client.close()
+
+
+@pytest.mark.regression
+async def test_route_matrix_truncated_rows_raise() -> None:
+    """响应行数少于目的地数 → SERVER 错误，不得静默透传错位结果。
+
+    回归（BF-006）：routematrix v2 可能省略不可步行/非法坐标的结果行；
+    适配器若原样透传，下游 zip(strict) 抛 ValueError 击穿"只捕 MapApiError"
+    的降级守卫，整个分析任务在等时圈+POI 预算花完后报废。
+    """
+    with respx.mock:
+        respx.get(ROUTEMATRIX_URL).mock(return_value=httpx.Response(200, json=matrix_payload(2)))
+        client = make_client()
+        dests = [(116.32, 39.98), (116.33, 39.98), (116.34, 39.98)]
+        with pytest.raises(MapApiError) as exc_info:
+            await client.route_matrix((116.316628, 39.981909), dests)
+        assert exc_info.value.kind == ErrorKind.SERVER
+        await client.close()

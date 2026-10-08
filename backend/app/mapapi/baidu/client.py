@@ -219,6 +219,14 @@ class BaiduClient:
             )
             results = data.get("result") or []
             # 响应按 origin×destination 笛卡尔积行优先排列；单源场景与输入同序
+            if len(results) != len(batch):
+                # 行数与目的地数不符（上游截断/丢行）：缺失行无法对应回具体目的地，
+                # 静默截断或补 None 都会把耗时错配到别的设施——按上游故障抛出，
+                # 由编排层决定降级（铁律 #3：故障策略收口在适配器，语义决策在编排层）
+                raise MapApiError(
+                    ErrorKind.SERVER,
+                    f"routematrix 响应行数 {len(results)} != 目的地数 {len(batch)}",
+                )
             for item in results:
                 distance = (item.get("distance") or {}).get("value")
                 duration = (item.get("duration") or {}).get("value")
