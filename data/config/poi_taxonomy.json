@@ -1,8 +1,8 @@
 {
   "categories": [
-    { "key": "medical", "label": "医疗（药店）", "query": "药店", "filter_pattern": "药" },
-    { "key": "education", "label": "教育（小学）", "query": "小学", "filter_pattern": "小学" },
-    { "key": "shopping", "label": "购物（菜市场）", "query": "菜市场", "filter_pattern": "菜市场|农贸市场" },
-    { "key": "elderly", "label": "养老", "query": "养老院", "filter_pattern": "养老" }
+    { "key": "medical", "label": "医疗（药店）", "queries": ["药店"], "filter_pattern": "药" },
+    { "key": "education", "label": "教育（小学）", "queries": ["小学", "学校"], "filter_pattern": "小学|九年一贯制" },
+    { "key": "shopping", "label": "购物（菜市场）", "queries": ["菜市场"], "filter_pattern": "菜市场|农贸市场" },
+    { "key": "elderly", "label": "养老", "queries": ["养老院"], "filter_pattern": "养老" }
   ]
 }

@@ -43,6 +43,9 @@ async def test_replay_poi_radius_and_noise() -> None:
     education = await provider.search_pois("小学", center, 1300, 20, 5)
     # "中关村中学" 噪音条目由服务层 filter_pattern 剔除，Provider 层原样返回 4 条
     assert len(education) == 4
+    # 教育第二检索词"学校"：召回九年一贯制/门禁 POI（BF：实验小学类校名仅门禁可召回）
+    by_school = await provider.search_pois("学校", center, 1300, 20, 5)
+    assert len(by_school) == 8
 
 
 async def test_replay_walking_route_matches_matrix_model() -> None:
@@ -59,7 +62,11 @@ async def test_replay_walking_route_matches_matrix_model() -> None:
 
 
 def test_api_demo_flow() -> None:
-    """API 级冒烟：health → demo hint → geocode → pois → 参数校验 422。"""
+    """API 级冒烟：health → demo hint → geocode → pois → 参数校验 422。
+
+    回归（BF-010）：教育类目多检索词召回口径——"学校"召回的门禁 POI 在主体
+    缺席时保留为学校代表、九年一贯制保留、同校门禁坍缩不重复计数。
+    """
     with make_demo_app() as client:
         health = client.get("/api/v1/health").json()
         assert health["status"] == "ok"
@@ -82,7 +89,16 @@ def test_api_demo_flow() -> None:
         # 同名 30m 内去重：同名只出现一次
         assert names.count("金象大药房(中关村店)") == 1
         # 类目噪音被过滤：中学不出现在教育类目
-        assert all("中学" not in n for n in [p["name"] for p in pois["categories"]["education"]])
+        edu_names = [p["name"] for p in pois["categories"]["education"]]
+        assert all("中学" not in n for n in edu_names)
+        # 多检索词召回口径（BF：实验小学类校名漏召回）：
+        # "学校"召回的门禁 POI 在主体缺席时保留为学校代表
+        assert "中关村实验小学西门" in edu_names
+        # 九年一贯制学校（含小学部）由 tag 命中保留
+        assert "中关村科学城学校" in edu_names
+        # 同校门禁在主体在场时坍缩，不得重复计数
+        assert "中关村第二小学-南门" not in edu_names
+        assert edu_names.count("中关村第二小学") == 1
 
         bad = client.get("/api/v1/pois", params={"lng": 10, "lat": 10, "categories": "foo"})
         assert bad.status_code == 422
