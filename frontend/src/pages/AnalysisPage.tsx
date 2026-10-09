@@ -300,7 +300,7 @@ export default function AnalysisPage() {
                         <List.Item>
                           <Text style={{ color: cat.color }}>●</Text> {poi.name}
                           {poi.distance_m != null && (
-                            <Text type="secondary"> （{(poi.distance_m / 1000).toFixed(2)} km）</Text>
+                            <Text type="secondary"> （直线 {(poi.distance_m / 1000).toFixed(2)} km）</Text>
                           )}
                         </List.Item>
                       )}
