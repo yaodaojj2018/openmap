@@ -1,6 +1,6 @@
 # BF-010 「实验小学」类校名不被 query=小学 召回，教育类目大面积漏设施
 
-- 日期：2026-10-09 　提交：<hash 待回填> 　影响模块：`app/poi/service.py`、`data/config/poi_taxonomy.json`、`data/replays/demo.json`
+- 日期：2026-10-09 　提交：72ba4cf 　影响模块：`app/poi/service.py`、`data/config/poi_taxonomy.json`、`data/replays/demo.json`
 
 ## 现象
 
