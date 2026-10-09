@@ -19,6 +19,7 @@ import {
   Col,
   Space,
   Spin,
+  Switch,
   Tabs,
   Typography,
 } from 'antd'
@@ -63,6 +64,8 @@ export default function AnalysisPage() {
   const [query, setQuery] = useState('')
   const [candidates, setCandidates] = useState<GeocodeCandidate[]>([])
   const [searching, setSearching] = useState(false)
+  // 方案 A：地图默认只画阈值圈，多级内圈由开关展开（数据/报告口径不变）
+  const [showAllLevels, setShowAllLevels] = useState(false)
   const taskRunning = taskStatus === 'pending' || taskStatus === 'running'
 
   const applyCandidate = useCallback(
@@ -131,6 +134,13 @@ export default function AnalysisPage() {
   }, [runTask, store])
 
   const resultTabs = CATEGORY_LIST.filter((c) => pois[c.key]?.length)
+  // 阈值圈 = 最大级别（resolve_levels 保证），其余为可按需展开的内圈
+  const isoInnerLabels =
+    isochrone == null
+      ? []
+      : isochrone.levels
+          .filter((lv) => lv.level_min < Math.max(...isochrone.levels.map((l) => l.level_min)))
+          .map((lv) => `${lv.level_min} 分钟`)
 
   return (
     <>
@@ -148,7 +158,7 @@ export default function AnalysisPage() {
           styles={{ body: { height: '68vh' } }}
         >
           <MapCanvas ak={ak} center={{ lng: 116.316628, lat: 39.981909 }} onPick={onPick}>
-            <IsochroneLayer />
+            <IsochroneLayer showAll={showAllLevels} />
             <BlindspotLayer />
             <OriginMarker />
             <PoiMarkers />
@@ -258,6 +268,14 @@ export default function AnalysisPage() {
             {isoLoading && <Spin style={{ display: 'block', margin: '24px auto' }} />}
             {!isoLoading && isochrone && (
               <div>
+                {isoInnerLabels.length > 0 && (
+                  <Space style={{ marginBottom: 8 }}>
+                    <Switch size="small" checked={showAllLevels} onChange={setShowAllLevels} />
+                    <Text type="secondary">
+                      地图显示内圈（{isoInnerLabels.join('、')}），默认仅画阈值圈
+                    </Text>
+                  </Space>
+                )}
                 {isochrone.levels.map((lv) => (
                   <div key={lv.level_min}>
                     <Text strong>{lv.level_min} 分钟</Text>
