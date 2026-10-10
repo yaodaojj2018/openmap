@@ -2,8 +2,10 @@
 """BF 归档 ↔ 回归测试一致性检查（docs/regression-ci.md §1 步骤②）。
 
 规则：
-- docs/bugfix/README.md 索引表中的每个 BF-XXX，必须能在 backend/tests/ 的测试
-  源码（docstring/注释）中找到引用 —— 即"重要 Bug 修复必须附带回归测试"；
+- docs/bugfix/README.md 索引表中的每个 BF-XXX，必须能在测试源码（docstring/注释）
+  中找到引用 —— 即"重要 Bug 修复必须附带回归测试"。引用来源含后端 pytest
+  （backend/tests/**.py）与前端 vitest（frontend/tests/**.ts(x)）两类：纯前端
+  缺陷的回归 seam 在前端状态机，不应强行在后端伪造弱 seam；
 - 反向：测试里引用的 BF 编号必须已在索引表登记（先登记再引用，含已退役条目）；
 - 状态含「已退役」的条目免于双向校验（退役规则见 docs/regression-ci.md §6.1）：
   无测试引用不红灯、残留引用不算孤儿——退役白名单与档案「退役记录」由 review 把关；
@@ -20,7 +22,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_FILE = REPO_ROOT / "docs" / "bugfix" / "README.md"
-TESTS_DIR = REPO_ROOT / "backend" / "tests"
+# 回归测试引用来源：后端 pytest 与前端 vitest（纯前端缺陷的 seam 在前端）
+TEST_GLOBS = (
+    (REPO_ROOT / "backend" / "tests", ("*.py",)),
+    (REPO_ROOT / "frontend" / "tests", ("*.ts", "*.tsx")),
+)
 
 # 索引表行形如 "| [BF-001](2026-09-30-xxx.md) | ... |"，只认表格里的链接形式，
 # 避免把正文/模板中顺带提到的编号误当索引项
@@ -45,9 +51,13 @@ def indexed_bug_rows() -> list[tuple[str, bool]]:
 
 def test_references() -> dict[str, list[Path]]:
     refs: dict[str, list[Path]] = {}
-    for py in sorted(TESTS_DIR.rglob("*.py")):
-        for bf in sorted(set(BF_REF_RE.findall(py.read_text(encoding="utf-8")))):
-            refs.setdefault(bf, []).append(py)
+    for tests_dir, patterns in TEST_GLOBS:
+        if not tests_dir.is_dir():
+            continue
+        for pattern in patterns:
+            for path in sorted(tests_dir.rglob(pattern)):
+                for bf in sorted(set(BF_REF_RE.findall(path.read_text(encoding="utf-8")))):
+                    refs.setdefault(bf, []).append(path)
     return refs
 
 
@@ -76,8 +86,8 @@ def main() -> int:
         print("\n[FAIL] 以下现役 BF 没有任何回归测试引用（规则见 docs/regression-ci.md §6）：")
         for bf in missing:
             print(f"  - {bf}")
-        print("补法：测试加 @pytest.mark.regression 且 docstring 注明编号，")
-        print("归档「影响范围与注意事项」登记测试节点 ID。")
+        print("补法：测试注明编号（后端 @pytest.mark.regression + docstring 写 BF-XXX；")
+        print("前端用例名/注释含 BF-XXX），归档「影响范围与注意事项」登记测试节点 ID。")
     if orphans:
         ok = False
         print("\n[FAIL] 测试引用了未登记的 BF 编号（先在 docs/bugfix/README.md 索引表登记）：")

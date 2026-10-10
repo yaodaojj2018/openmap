@@ -20,6 +20,7 @@
 | WSL Ubuntu 3.12.3，但**缺 python3-venv**（`python3 -m venv` 生成的目录无 pip） | 后端依赖用系统 pip 安装：`python3 -m pip install --break-system-packages -e ".[dev]"`（已装好）；**不要**尝试 venv |
 | WSL 调用输出含 UTF-16 告警头，管道过滤要 `tr -d '\0'` | 验证命令输出勿用 grep 吞错误（曾导致误报"install ok"） |
 | Windows 侧 node v24 / npm 可用 | 前端命令直接在 Git Bash 执行 |
+| 本机访问 `registry.npmjs.org` 极慢/超时（`npm install` 静默卡死，`npm ping` 无响应） | 新增前端依赖用镜像：`npm install -D <pkg> --registry=https://registry.npmmirror.com`；装完把 `package-lock.json` 里的 `registry.npmmirror.com` sed 回 `registry.npmjs.org`（同一 tarball，integrity 不变），CI 仍走官方源 |
 | `make` 仅存在于 WSL（Git Bash 无 make） | 后端相关 make 目标在 WSL 执行；前端在 Git Bash 直跑 npm；一键启动/重启用根目录 `start-dev.bat`（双击即可） |
 | Docker Desktop 可用（WSL2 后端） | compose 构建验证可用，但较慢，优先本地验证 |
 | 本目录不是 git 仓库时要先 `git init` | 交付要求 Git 托管，Apache-2.0 |
@@ -56,7 +57,7 @@
 python3 -m ruff format --check . && python3 -m ruff check . && python3 -m mypy && python3 -m pytest -q
 
 # 前端（Windows Git Bash，位于 frontend/）
-npm run lint && npm run build
+npm run lint && npm test && npm run build
 
 # compose 配置合法性（仓库根）
 docker compose config -q

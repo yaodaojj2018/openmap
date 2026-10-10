@@ -46,6 +46,7 @@ interface AnalysisState {
   taskStarted: (taskId: string, status: TaskStatus, stage: TaskStage, progress: number) => void
   taskStageChanged: (stage: TaskStage, progress?: number) => void
   taskProgressed: (progress: number) => void
+  taskCompleted: () => void
   taskFailed: (error: string) => void
   taskReset: () => void
   reset: () => void
@@ -100,6 +101,9 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
     })),
   taskProgressed: (progress) =>
     set((s) => (progress > s.taskProgress ? { taskProgress: progress } : {})),
+  // 报告落档即任务终态：SSE completed 事件只驱动取报告，若无人把 status 置为
+  // completed，taskRunning（按钮 loading/进度条）将永久停留在 running
+  taskCompleted: () => set({ taskStatus: 'completed', taskStage: 'completed', taskProgress: 1 }),
   taskFailed: (taskError) => set({ taskStatus: 'failed', taskError }),
   taskReset: () => set(TASK_DEFAULTS),
   reset: () =>

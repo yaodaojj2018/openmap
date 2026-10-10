@@ -62,6 +62,7 @@ export function useAnalysisTask() {
     useAnalysisStore.setState({ degradedFlags: report.degraded_flags })
     s.setIsoLoading(false)
     s.setPoiLoading(false)
+    s.taskCompleted() // 终态化任务：两条完成路径（SSE 事件/参数复用）统一在此收口
   }, [])
 
   /** 终态统一处理：completed 拉报告，failed 落错误，cancelled 静默（被新任务取代） */

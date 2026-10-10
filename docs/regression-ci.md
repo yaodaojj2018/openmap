@@ -43,7 +43,8 @@ PR 提交/更新
  │   ├─ pytest -m smoke                             # ③ 冒烟先行
  │   └─ pytest -q --cov=app.isochrone --cov=app.poi
  │         --cov-fail-under=95 --junitxml=pytest.xml # 全量 + 域层覆盖率门禁
- ├─ frontend job（lint + build，既有）
+ ├─ frontend job（lint + test + build）
+ │   └─ vitest run                                  # 前端回归（BF↔测试一致性含前端 seam）
  └─ merge 条件 = 上述全绿 + ≥1 human review
 main push → docker job（compose 校验 + 镜像构建，既有）
 ```
@@ -58,8 +59,10 @@ main push → docker job（compose 校验 + 镜像构建，既有）
    凑数测试。阈值 95 = 基线 97% 向下留 2 个点余量的棘轮：防倒退，不做 aspirational 目标；
    只允许单调上调，下调必须走 docs/02 变更说明。
 3. **BF 一致性检查是轻脚本不是框架**。解析 `docs/bugfix/README.md` 索引表中的 BF 编号，
-   确认每个都能在 `backend/tests/` 中 grep 到引用，反向报告孤儿引用。零依赖（标准库），
-   失败信息直接给出缺口，不产出需要二次解读的报告。
+   确认每个都能在**测试源码**中 grep 到引用（后端 `backend/tests/**.py` 或前端
+   `frontend/tests/**.ts(x)`），反向报告孤儿引用。纯前端缺陷（如任务状态机）的回归
+   seam 在前端 store/hook，不应为过门禁在后端伪造弱 seam——故引用来源含前端 vitest。
+   零依赖（标准库），失败信息直接给出缺口，不产出需要二次解读的报告。
 
 ## 5. 标记规范与本地命令
 
@@ -75,6 +78,9 @@ python3 -m pytest -m smoke -q        # 改完先跑：秒级、主链路
 python3 -m pytest -m regression -q   # 再跑：历史 Bug 防复发
 python3 -m pytest -q                 # 最后全量（AI 改动的默认终点）
 python3 scripts/check_bugfix_regression.py   # 动了 bugfix 归档或测试引用时
+
+# 本地（Git Bash，frontend/ 下）
+npm test                             # 前端回归（vitest run，BF↔测试一致性用）
 ```
 
 AI 协作顺序即 CLAUDE.md"验证命令"的顺序：静态检查 → 冒烟 → 回归 → 全量。
