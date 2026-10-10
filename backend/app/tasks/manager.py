@@ -44,12 +44,20 @@ def _now() -> datetime:
 
 
 def params_hash(params: AnalysisParams) -> str:
-    """参数归一化哈希：坐标取整 6 位小数（≈0.1m 精度）+ 类目排序（docs/02 §5.2 复用口径）。"""
+    """参数归一化哈希：坐标取整 6 位小数（≈0.1m 精度）+ 类目排序（docs/02 §5.2 复用口径）。
+
+    出入口集合参与哈希（排序消除顺序差异）：不同出入口组合不得命中同一缓存复用。
+    """
     lng, lat = params.origin.to_bd09()
+    entry_points = ",".join(
+        f"{round(elng, 6)},{round(elat, 6)}"
+        for elng, elat in sorted(c.to_bd09() for c in params.entry_points)
+    )
     return cache_key(
         "analysis-params",
         lng=round(lng, 6),
         lat=round(lat, 6),
+        entry_points=entry_points,
         minutes=params.minutes,
         categories=",".join(sorted(params.categories)),
     )

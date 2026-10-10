@@ -22,7 +22,10 @@ class AnalysisReport(BaseModel):
     """完整分析报告（/analyses/{id}/result 响应）。坐标均为 BD09。"""
 
     task_id: str
-    origin: Coord = Field(description="规范化后的中心点（bd09）")
+    origin: Coord = Field(description="规范化后的中心点（bd09，多源时 = 出入口质心）")
+    entry_points: list[Coord] = Field(
+        default_factory=list, description="等时圈源点（1~3 个小区出入口，前端据此重绘标记）"
+    )
     minutes: int = Field(description="步行时长阈值（分钟）")
     isochrone: IsochroneResult = Field(description="多级等时圈（v1 射线样条）")
     poi: PoiSearchResult = Field(description="分类设施清单（单类目失败时该类为空列表）")

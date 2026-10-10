@@ -34,19 +34,22 @@ export interface PoiSearchResult {
 export interface DemoHint {
   address: string
   origin: { lng: number; lat: number; crs: Crs }
+  entry_points?: { lng: number; lat: number; crs: Crs }[]
   categories: CategoryKey[]
 }
 
 export interface IsochroneLevel {
   level_min: number
-  /** GeoJSON Polygon rings：[ [ [lng,lat], ... ] ]（bd09） */
-  coordinates: number[][][]
+  /** GeoJSON MultiPolygon：[ [ [ [lng,lat], ... ] ] ]（bd09）；单源 = 1 元素 */
+  coordinates: number[][][][]
   area_km2: number
   confidence: number
 }
 
 export interface IsochroneResult {
   origin: { lng: number; lat: number; crs: Crs }
+  /** 实际参与并集的源点（1~3 个小区出入口） */
+  origins?: { lng: number; lat: number; crs: Crs }[]
   levels: IsochroneLevel[]
   probe_count: number
   matrix_batches: number
@@ -69,6 +72,7 @@ export type TaskStage =
 
 export interface AnalysisParams {
   origin: { lng: number; lat: number; crs: Crs }
+  entry_points?: { lng: number; lat: number; crs: Crs }[]
   minutes: number
   categories: CategoryKey[]
 }
@@ -154,6 +158,8 @@ export interface BlindspotResult {
 export interface AnalysisReport {
   task_id: string
   origin: { lng: number; lat: number; crs: Crs }
+  /** 等时圈源点（1~3 个小区出入口，前端重连后据此重绘标记） */
+  entry_points?: { lng: number; lat: number; crs: Crs }[]
   minutes: number
   isochrone: IsochroneResult
   poi: PoiSearchResult

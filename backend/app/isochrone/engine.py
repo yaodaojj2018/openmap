@@ -218,7 +218,7 @@ async def compute_isochrone(
         out_levels.append(
             IsochroneLevel(
                 level_min=minute,
-                coordinates=rings,
+                coordinates=[rings],  # 单源 = 1 元素 MultiPolygon（多源并集在编排层合并）
                 area_km2=area_km2,
                 confidence=confidence,
             )
@@ -236,6 +236,7 @@ async def compute_isochrone(
     return IsochroneComputation(
         result=IsochroneResult(
             origin=Coord(lng=origin[0], lat=origin[1], crs="bd09"),
+            origins=[Coord(lng=origin[0], lat=origin[1], crs="bd09")],
             levels=out_levels,
             probe_count=field.probe_count,
             matrix_batches=batches,

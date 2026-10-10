@@ -11,23 +11,25 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import structlog
+from shapely import unary_union
+from shapely.geometry.base import BaseGeometry
 
 from app.blindspot.grid import compute_blindspot
 from app.core.budget import budget_scope, current_budget
 from app.core.config import Settings
+from app.core.geometry import geometry_to_rings, local_area_km2, rings_to_geometry
 from app.coverage.funnel import (
-    build_polygon,
     classify_facilities,
     merge_matrix_verdicts,
     merge_walking_verdicts,
     summarize_categories,
 )
-from app.isochrone.engine import compute_isochrone
+from app.isochrone.engine import IsochroneComputation, compute_isochrone
 from app.mapapi.provider import BD09Point, MapApiError, MapProvider
 from app.models.common import Coord
 from app.models.coverage import CoverageResult
 from app.models.geocode import GeocodeCandidate
-from app.models.isochrone import RouteLeg
+from app.models.isochrone import IsochroneLevel, IsochroneResult, RouteLeg
 from app.models.poi import PoiRecord, PoiSearchResult
 from app.models.report import AnalysisReport
 from app.models.task import AnalysisParams, TaskStage
@@ -122,6 +124,55 @@ def resolve_levels(minutes: int, settings: Settings) -> list[int]:
     return sorted({m for m in settings.isochrone_levels_min if m < minutes} | {minutes})
 
 
+def _rings_union(rings_list: list[list[list[list[float]]]]) -> BaseGeometry | None:
+    """GeoJSON MultiPolygon 环组 → shapely 并集几何（任一源多边形即并集，空集返回 None）。"""
+    geoms = [g for poly in rings_list if (g := rings_to_geometry(poly)) is not None]
+    return unary_union(geoms) if geoms else None
+
+
+def _merge_iso(
+    computations: list[IsochroneComputation],
+    levels_min: list[int],
+    origin: BD09Point,
+    origins: list[Coord],
+) -> IsochroneResult:
+    """多源等时圈并集（docs/02 §3.1）：逐级把各源多边形 unary_union 成 MultiPolygon。
+
+    单源时 = 直接透传该源结果（1 元素 MultiPolygon）；多源并集后可达集可能不连通。
+    probe_count/matrix_batches 求和、confidence 取各源最小值（并集置信度不高于最弱源）。
+    """
+    levels: list[IsochroneLevel] = []
+    for idx, minute in enumerate(levels_min):
+        union = _rings_union(
+            [poly for comp in computations for poly in comp.result.levels[idx].coordinates]
+        )
+        rings = geometry_to_rings(union) if union is not None and not union.is_empty else []
+        area_km2 = (
+            round(local_area_km2(union, origin), 4)
+            if union is not None and not union.is_empty
+            else 0.0
+        )
+        confidence = min(comp.result.levels[idx].confidence for comp in computations)
+        levels.append(
+            IsochroneLevel(
+                level_min=minute, coordinates=rings, area_km2=area_km2, confidence=confidence
+            )
+        )
+    degraded_reason = next(
+        (c.result.degraded_reason for c in computations if c.result.degraded_reason is not None),
+        None,
+    )
+    return IsochroneResult(
+        origin=Coord(lng=origin[0], lat=origin[1], crs="bd09"),
+        origins=origins,
+        levels=levels,
+        probe_count=sum(c.result.probe_count for c in computations),
+        matrix_batches=sum(c.result.matrix_batches for c in computations),
+        method="straight-estimate" if degraded_reason else "ray-spline-v1",
+        degraded_reason=degraded_reason,
+    )
+
+
 async def run_analysis(
     task_id: str,
     params: AnalysisParams,
@@ -159,29 +210,38 @@ async def _run_analysis(
     # ① resolving：坐标规范化。地址解析在创建前的 /geocode 完成（docs/02 §5.1 时序），
     #    任务内只做 crs → bd09 纯本地转换，不消耗 API。
     await reporter.on_stage(TaskStage.resolving)
-    origin_bd09 = params.origin.to_bd09()
+    origin_bd09 = params.origin.to_bd09()  # 代表中心（多源 = 出入口质心）
+    origins_bd09 = [c.to_bd09() for c in params.entry_points]
+    entry_point_coords = [Coord(lng=o[0], lat=o[1], crs="bd09") for o in origins_bd09]
+    levels_min = resolve_levels(params.minutes, settings)
     await reporter.on_progress(STAGE_WINDOWS[TaskStage.resolving][1])
 
-    # ② sampling + fitting：engine 的本地阶段回调 → 全局进度窗口映射
+    # ② sampling + fitting：多源逐出入口跑等时圈，各源进度映射进 sampling/fitting 窗口
+    #    的等分子区间，保证全局进度单调递增（docs/02 §3.1 多源并集）。
     await reporter.on_stage(TaskStage.sampling)
     seen_stages: set[str] = {"sampling"}  # sampling 已上报，避免 engine 首次回调重复推进
+    n_sources = len(origins_bd09)
+    computations: list[IsochroneComputation] = []
+    for i, src in enumerate(origins_bd09):
+        src_lo = i / n_sources
+        src_hi = (i + 1) / n_sources
 
-    async def engine_hook(stage_name: str, frac: float) -> None:
-        if stage_name not in seen_stages:
-            seen_stages.add(stage_name)
-            await reporter.on_stage(TaskStage(stage_name))
-        lo, hi = STAGE_WINDOWS[TaskStage(stage_name)]
-        await reporter.on_progress(lo + (hi - lo) * max(0.0, min(frac, 1.0)))
+        async def engine_hook(
+            stage_name: str, frac: float, _lo: float = src_lo, _hi: float = src_hi
+        ) -> None:
+            if stage_name not in seen_stages:
+                seen_stages.add(stage_name)
+                await reporter.on_stage(TaskStage(stage_name))
+            wlo, whi = STAGE_WINDOWS[TaskStage(stage_name)]
+            local = _lo + (_hi - _lo) * max(0.0, min(frac, 1.0))
+            await reporter.on_progress(wlo + (whi - wlo) * local)
 
-    computation = await compute_isochrone(
-        counting,
-        settings,
-        origin_bd09,
-        resolve_levels(params.minutes, settings),
-        on_progress=engine_hook,
-    )
-    isochrone = computation.result
-    time_field = computation.field
+        computations.append(
+            await compute_isochrone(counting, settings, src, levels_min, on_progress=engine_hook)
+        )
+
+    isochrone = _merge_iso(computations, levels_min, origin_bd09, entry_point_coords)
+    time_fields = [c.field for c in computations]
     if isochrone.degraded_reason is not None:
         # 等时圈估算口径（docs/02 §3.4 第三级）：报告必须显式声明，不冒充实测
         degraded.append(f"isochrone:{isochrone.degraded_reason}")
@@ -225,11 +285,20 @@ async def _run_analysis(
     flat_records = [rec for key in params.categories for rec in facilities.get(key, [])]
 
     def _estimate(lng: float, lat: float) -> float | None:
-        return time_field.estimate_seconds(origin_bd09, lng, lat)
+        # 多源 min-time：任一入口可达即圈内；全 None（各源均阻挡/无样本）才回落三级精判
+        times = [
+            f.estimate_seconds(src, lng, lat)
+            for f, src in zip(time_fields, origins_bd09, strict=True)
+        ]
+        valid = [t for t in times if t is not None]
+        return min(valid) if valid else None
+
+    # 一级几何 = 各源等时圈的并集（MultiPolygon）：任一源几何包含即圈内
+    union_geom = _rings_union(isochrone.levels[-1].coordinates)
 
     verdicts, edge_indices = classify_facilities(
         flat_records,
-        build_polygon(isochrone.levels[-1].coordinates),
+        union_geom,
         _estimate,
         threshold_s,
         threshold_s - band_s,
@@ -319,6 +388,7 @@ async def _run_analysis(
     return AnalysisReport(
         task_id=task_id,
         origin=origin_coord,
+        entry_points=entry_point_coords,
         minutes=params.minutes,
         isochrone=isochrone,
         poi=PoiSearchResult(

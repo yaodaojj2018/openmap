@@ -2,6 +2,10 @@
   "meta": {
     "address": "北京市海淀区中关村大街1号",
     "origin": { "lng": 116.316628, "lat": 39.981909, "crs": "bd09" },
+    "entry_points": [
+      { "lng": 116.315628, "lat": 39.981909, "crs": "bd09" },
+      { "lng": 116.317628, "lat": 39.981909, "crs": "bd09" }
+    ],
     "categories": ["medical", "education", "shopping", "elderly"]
   },
   "geocode": {

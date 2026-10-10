@@ -11,9 +11,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.deps import get_task_manager
+from app.core.coords import centroid_bd09
 from app.models.common import Coord
 from app.models.poi import CategoryKey
 from app.models.report import AnalysisReport
@@ -31,13 +32,26 @@ _SSE_HEARTBEAT_S = 15.0
 
 
 class AnalysisRequest(BaseModel):
-    """POST /analyses 请求体（docs/02 §5.3）。"""
+    """POST /analyses 请求体（docs/02 §5.3）。
 
-    origin: Coord = Field(description="中心点（crs 可选 bd09/gcj02/wgs84，内部统一转 bd09）")
+    多源并集：`entry_points`（1~3 个小区出入口）驱动等时圈；`origin` 为代表中心，
+    缺省时由 `entry_points` 的质心推导（docs/02 §3.1 多源并集）。
+    """
+
+    origin: Coord | None = Field(default=None, description="代表中心（缺省 = 出入口质心）")
+    entry_points: list[Coord] | None = Field(
+        default=None, max_length=3, description="1~3 个小区出入口（等时圈源点）"
+    )
     minutes: int = Field(default=15, ge=1, le=30, description="步行时长阈值（分钟）")
     categories: list[CategoryKey] = Field(
         default_factory=list, description="设施大类，空 = 四大类全选"
     )
+
+    @model_validator(mode="after")
+    def _require_origin_or_entry_points(self) -> AnalysisRequest:
+        if self.origin is None and not self.entry_points:
+            raise ValueError("origin 与 entry_points 至少提供一个")
+        return self
 
 
 @router.post("/analyses", response_model=AnalysisTask, status_code=202, summary="创建分析任务")
@@ -46,8 +60,18 @@ async def create_analysis(
     manager: Annotated[TaskManager, Depends(get_task_manager)],
 ) -> AnalysisTask:
     """创建异步分析任务；同参数复用既有任务，新中心点自动取消旧任务。"""
+    if body.entry_points:
+        bd09_pts = [c.to_bd09() for c in body.entry_points]
+        c_lng, c_lat = centroid_bd09(bd09_pts)
+        origin = body.origin or Coord(lng=c_lng, lat=c_lat, crs="bd09")
+        entry_points = body.entry_points
+    else:
+        assert body.origin is not None  # 校验器保证至少其一
+        origin = body.origin
+        entry_points = [body.origin]
     params = AnalysisParams(
-        origin=body.origin,
+        origin=origin,
+        entry_points=entry_points,
         minutes=body.minutes,
         categories=body.categories or list(DEFAULT_CATEGORIES),
     )

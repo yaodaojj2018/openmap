@@ -1,5 +1,7 @@
 """坐标转换单测：精确互逆性、境内偏移量级、境外直通、距离公式。"""
 
+import pytest
+
 from app.core import coords
 
 
@@ -39,3 +41,18 @@ def test_haversine_known_distance() -> None:
     """北纬 39.915 处经度差 0.01 度 ≈ 853 米。"""
     d = coords.haversine_m(116.404, 39.915, 116.414, 39.915)
     assert 830 < d < 875
+
+
+def test_centroid_bd09_arithmetic_mean() -> None:
+    """出入口质心 = 经纬度算术均值（小区尺度，误差可忽略）。"""
+    pts = [(116.0, 39.0), (116.002, 39.0), (116.004, 39.0)]
+    assert coords.centroid_bd09(pts) == (116.002, 39.0)
+
+
+def test_centroid_bd09_single_point_identity() -> None:
+    assert coords.centroid_bd09([(116.3, 39.9)]) == (116.3, 39.9)
+
+
+def test_centroid_bd09_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        coords.centroid_bd09([])

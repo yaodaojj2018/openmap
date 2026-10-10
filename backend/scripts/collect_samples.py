@@ -86,7 +86,7 @@ def _derive_metrics(report: AnalysisReport) -> dict[str, object]:
     lng, lat = report.origin.to_bd09()
     levels = []
     for lv in report.isochrone.levels:
-        ring = lv.coordinates[0] if lv.coordinates else []
+        ring = lv.coordinates[0][0] if lv.coordinates and lv.coordinates[0] else []
         entry: dict[str, object] = {"level_min": lv.level_min, "area_km2": lv.area_km2}
         if ring:
             entry.update(_level_metrics(lng, lat, ring))

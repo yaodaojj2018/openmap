@@ -121,3 +121,16 @@ def offset_lnglat(lng: float, lat: float, dx_m: float, dy_m: float) -> LngLat:
         lng + dx_m / (M_PER_DEG * math.cos(math.radians(lat))),
         lat + dy_m / M_PER_DEG,
     )
+
+
+def centroid_bd09(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """多源点（小区出入口）的代表中心：经纬度算术均值（bd09）。
+
+    用途：POI 检索中心 / 盲区原点 / 覆盖矩阵验证源点 / 报告 origin。点集同属
+    一个社区（间距数百米级），球面曲率与跨经度纬向收缩的误差在米级以下，
+    无需大地测量质心。
+    """
+    if not points:
+        raise ValueError("centroid_bd09 需要至少一个点")
+    n = len(points)
+    return sum(p[0] for p in points) / n, sum(p[1] for p in points) / n

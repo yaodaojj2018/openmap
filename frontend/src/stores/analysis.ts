@@ -17,6 +17,8 @@ export interface Origin {
 
 interface AnalysisState {
   origin: Origin | null
+  /** 等时圈源点（1~3 个小区出入口）；单点 = [origin] */
+  entryPoints: Origin[]
   address: string
   selected: CategoryKey[]
   pois: Partial<Record<CategoryKey, PoiRecord[]>>
@@ -35,6 +37,9 @@ interface AnalysisState {
   taskError: string | null
   degradedFlags: string[]
   setOrigin: (origin: Origin | null, address?: string) => void
+  setEntryPoints: (points: Origin[]) => void
+  addEntryPoint: (point: Origin) => void
+  removeEntryPoint: (index: number) => void
   toggleCategory: (key: CategoryKey) => void
   setPoiResult: (pois: Partial<Record<CategoryKey, PoiRecord[]>>) => void
   setPoiLoading: (loading: boolean) => void
@@ -65,6 +70,7 @@ const TASK_DEFAULTS = {
 
 export const useAnalysisStore = create<AnalysisState>((set) => ({
   origin: null,
+  entryPoints: [],
   address: '',
   selected: ALL,
   pois: {},
@@ -77,7 +83,50 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   ...TASK_DEFAULTS,
   // 中心点变化即作废旧任务/等时圈/POI/报告（数据只对当前中心点有效）
   setOrigin: (origin, address) =>
-    set((s) => ({ origin, address: address ?? s.address, pois: {}, isochrone: null, report: null, ...TASK_DEFAULTS })),
+    set((s) => ({
+      origin,
+      entryPoints: origin ? [origin] : [],
+      address: address ?? s.address,
+      pois: {},
+      isochrone: null,
+      report: null,
+      ...TASK_DEFAULTS,
+    })),
+  // 多源出入口（docs/02 §3.1 并集等时圈）：变更同样作废旧结果；origin 保持首点
+  setEntryPoints: (points) =>
+    set({
+      entryPoints: points.slice(0, 3),
+      origin: points[0] ?? null,
+      pois: {},
+      isochrone: null,
+      report: null,
+      ...TASK_DEFAULTS,
+    }),
+  addEntryPoint: (point) =>
+    set((s) => {
+      if (s.entryPoints.length >= 3) return {}
+      const points = s.entryPoints.length ? [...s.entryPoints, point] : [point]
+      return {
+        entryPoints: points,
+        origin: s.origin ?? point,
+        pois: {},
+        isochrone: null,
+        report: null,
+        ...TASK_DEFAULTS,
+      }
+    }),
+  removeEntryPoint: (index) =>
+    set((s) => {
+      const points = s.entryPoints.filter((_, i) => i !== index)
+      return {
+        entryPoints: points,
+        origin: points[0] ?? null,
+        pois: {},
+        isochrone: null,
+        report: null,
+        ...TASK_DEFAULTS,
+      }
+    }),
   toggleCategory: (key) =>
     set((s) => ({
       selected: s.selected.includes(key)
@@ -109,6 +158,7 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   reset: () =>
     set({
       origin: null,
+      entryPoints: [],
       address: '',
       selected: ALL,
       pois: {},

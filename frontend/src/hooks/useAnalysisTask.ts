@@ -35,6 +35,8 @@ export interface RunAnalysisOptions {
   lat: number
   categories: CategoryKey[]
   minutes?: number
+  /** 多源等时圈出入口（长度 >1 时并集） */
+  entryPoints?: { lng: number; lat: number }[]
 }
 
 export function useAnalysisTask() {
@@ -139,6 +141,7 @@ export function useAnalysisTask() {
           lat: opts.lat,
           categories: opts.categories,
           ...(opts.minutes ? { minutes: opts.minutes } : {}),
+          ...(opts.entryPoints?.length ? { entryPoints: opts.entryPoints } : {}),
         })
         currentIdRef.current = task.task_id
         useAnalysisStore.getState().taskStarted(task.task_id, task.status, task.stage, task.progress)

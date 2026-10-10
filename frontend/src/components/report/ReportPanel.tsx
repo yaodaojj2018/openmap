@@ -151,6 +151,10 @@ export default function ReportPanel({ report }: { report: AnalysisReport }) {
                 <Title level={5}>
                   盲区识别（{blindspot ? `${blindspot.threshold_m / 1000} km` : '1 km'} 内无设施即缺失）
                 </Title>
+                <Paragraph type="secondary" style={{ marginTop: -4, marginBottom: 8 }}>
+                  灰色区域为「周边 1 公里内无菜市场/药店/小学」的独立口径判定（直线距离），
+                  独立于 15 分钟等时圈，可能落在等时圈之外。
+                </Paragraph>
                 {blindspot == null ? (
                   <Empty description="暂无盲区数据" style={{ padding: 48 }} />
                 ) : blindspot.types.length === 0 ? (

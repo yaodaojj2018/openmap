@@ -78,6 +78,7 @@ class Settings(BaseSettings):
 
     # ---- 等时圈引擎（docs/02 §3.1）----
     matrix_batch_size: int = 50  # routematrix 单批目的地上限（官方口径，可配）
+    entry_points_max: int = 3  # 多源并集等时圈：小区出入口数量上限（docs/02 §3.1）
     isochrone_directions: int = 16  # 扇形采样方向数
     isochrone_rings_m: list[int] = [300, 600, 900, 1200]  # 粗采样距离档（米）
     isochrone_refine_rounds: int = 3  # 并行二分轮数（区间收敛至 ~50m）

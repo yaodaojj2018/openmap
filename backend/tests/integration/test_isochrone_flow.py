@@ -35,7 +35,7 @@ async def test_engine_levels_geometry_and_budget() -> None:
     assert 64 < result.probe_count <= 64 + 3 * 16 + Settings().isochrone_densify_max_probes
 
     for lv in result.levels:
-        ring = lv.coordinates[0]
+        ring = lv.coordinates[0][0]
         assert ring[0] == ring[-1], "GeoJSON 环必须闭合"
         assert len(ring) >= 160, "16 方向 × 每段 10 平滑采样点"
 
@@ -108,7 +108,7 @@ async def test_engine_blocked_direction_dent() -> None:
     result = (
         await compute_isochrone(load_provider(), Settings(demo_mode=True), ORIGIN, [15])
     ).result
-    ring = result.levels[0].coordinates[0]
+    ring = result.levels[0].coordinates[0][0]
     dists = [haversine_m(ORIGIN[0], ORIGIN[1], lng, lat) for lng, lat in ring]
     # 凹陷方向边界贴近 300m 保守可达点；开阔方向超过 1000m
     assert min(dists) < 450.0

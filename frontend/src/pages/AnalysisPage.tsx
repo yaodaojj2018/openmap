@@ -21,6 +21,7 @@ import {
   Spin,
   Switch,
   Tabs,
+  Tag,
   Typography,
 } from 'antd'
 import { SearchOutlined, ReloadOutlined, PlayCircleOutlined } from '@ant-design/icons'
@@ -44,6 +45,7 @@ export default function AnalysisPage() {
   const ak = import.meta.env.VITE_BMAP_AK ?? ''
   const {
     origin,
+    entryPoints,
     address,
     selected,
     pois,
@@ -66,6 +68,8 @@ export default function AnalysisPage() {
   const [searching, setSearching] = useState(false)
   // 方案 A：地图默认只画阈值圈，多级内圈由开关展开（数据/报告口径不变）
   const [showAllLevels, setShowAllLevels] = useState(false)
+  // 多源并集：添加入口模式下，地图点选追加第 2/3 个出入口（而非重置单中心点）
+  const [addingEntry, setAddingEntry] = useState(false)
   const taskRunning = taskStatus === 'pending' || taskStatus === 'running'
 
   const applyCandidate = useCallback(
@@ -92,9 +96,14 @@ export default function AnalysisPage() {
 
   const onPick = useCallback(
     (point: { lng: number; lat: number }) => {
-      store.getState().setOrigin(point, '')
+      if (!addingEntry) {
+        store.getState().setOrigin(point, '')
+        return
+      }
+      store.getState().addEntryPoint(point)
+      if (store.getState().entryPoints.length >= 3) setAddingEntry(false)
     },
-    [store],
+    [store, addingEntry],
   )
 
   /** 一键体检分析：等时圈 → POI → 覆盖漏斗 → 盲区全流水线，SSE 进度，报告落 store */
@@ -112,21 +121,24 @@ export default function AnalysisPage() {
       lng: state.origin.lng,
       lat: state.origin.lat,
       categories: state.selected,
+      ...(state.entryPoints.length > 1 ? { entryPoints: state.entryPoints } : {}),
     })
   }, [runTask, store])
 
   const loadDemo = useCallback(async () => {
     try {
       const hint = await fetchDemoHint()
-      store.getState().setOrigin(
-        { lng: hint.origin.lng, lat: hint.origin.lat },
-        hint.address,
+      const pts = (hint.entry_points ?? [{ lng: hint.origin.lng, lat: hint.origin.lat }]).map(
+        (p) => ({ lng: p.lng, lat: p.lat }),
       )
+      store.getState().setOrigin({ lng: hint.origin.lng, lat: hint.origin.lat }, hint.address)
+      if (pts.length > 1) store.getState().setEntryPoints(pts)
       setQuery(hint.address)
       await runTask({
         lng: hint.origin.lng,
         lat: hint.origin.lat,
         categories: hint.categories,
+        ...(pts.length > 1 ? { entryPoints: pts } : {}),
       })
     } catch (err) {
       message.error((err as Error).message)
@@ -147,11 +159,13 @@ export default function AnalysisPage() {
       <Row gutter={16}>
       <Col xs={24} lg={16}>
         <Card
-          title="社区地图（点击地图选择体检中心点）"
+          title="社区地图（点击地图选择出入口）"
           extra={
             <Text type="secondary">
               {origin
-                ? `中心点: ${origin.lng.toFixed(6)}, ${origin.lat.toFixed(6)} (bd09)`
+                ? entryPoints.length > 1
+                  ? `出入口 ${entryPoints.length} 个（并集等时圈）`
+                  : `中心点: ${origin.lng.toFixed(6)}, ${origin.lat.toFixed(6)} (bd09)`
                 : '尚未选择中心点'}
             </Text>
           }
@@ -210,6 +224,37 @@ export default function AnalysisPage() {
               <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
                 当前地址：{address}
               </Paragraph>
+            )}
+            {origin && (
+              <div style={{ marginTop: 8 }}>
+                <Button
+                  size="small"
+                  type={addingEntry ? 'primary' : 'default'}
+                  disabled={entryPoints.length >= 3}
+                  onClick={() => setAddingEntry((v) => !v)}
+                >
+                  {addingEntry ? '点击地图添加入口…' : `＋ 添加入口（${entryPoints.length}/3）`}
+                </Button>
+                {entryPoints.length > 0 && (
+                  <Space wrap style={{ marginTop: 8 }}>
+                    {entryPoints.map((p, i) => (
+                      <Tag
+                        key={`${p.lng}-${p.lat}-${i}`}
+                        closable={entryPoints.length > 1}
+                        onClose={() => store.getState().removeEntryPoint(i)}
+                      >
+                        {entryPoints.length > 1 ? `出入口${i + 1}` : '中心点'} {p.lng.toFixed(5)},{' '}
+                        {p.lat.toFixed(5)}
+                      </Tag>
+                    ))}
+                  </Space>
+                )}
+                {addingEntry && (
+                  <Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
+                    点击地图选择下一个出入口（并集等时圈最多 3 个）
+                  </Text>
+                )}
+              </div>
             )}
           </Card>
 

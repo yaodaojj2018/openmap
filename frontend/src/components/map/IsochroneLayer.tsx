@@ -32,21 +32,24 @@ export default function IsochroneLayer({ showAll = false }: IsochroneLayerProps)
     // 先加外圈（降序遍历），内圈后加叠在上
     const overlays = [...visible]
       .reverse()
-      .map((level, descIdx) => {
+      .flatMap((level, descIdx) => {
         const style = LEVEL_STYLES[visible.length - 1 - descIdx] ?? LEVEL_STYLES[LEVEL_STYLES.length - 1]
-        const ring = level.coordinates[0]
-        const polygon = new BMapGL.Polygon(
-          ring.map(([lng, lat]) => new BMapGL.Point(lng, lat)),
-          {
-            strokeColor: style.color,
-            strokeWeight: 2,
-            strokeOpacity: 0.9,
-            fillColor: style.color,
-            fillOpacity: style.fillOpacity,
-          },
-        )
-        map.addOverlay(polygon)
-        return polygon
+        // coordinates 为 GeoJSON MultiPolygon：多源并集后可达集可能不连通（多个多边形）
+        return level.coordinates.map((poly) => {
+          const ring = poly[0]
+          const polygon = new BMapGL.Polygon(
+            ring.map(([lng, lat]) => new BMapGL.Point(lng, lat)),
+            {
+              strokeColor: style.color,
+              strokeWeight: 2,
+              strokeOpacity: 0.9,
+              fillColor: style.color,
+              fillOpacity: style.fillOpacity,
+            },
+          )
+          map.addOverlay(polygon)
+          return polygon
+        })
       })
     return () => overlays.forEach((o) => map.removeOverlay(o))
   }, [map, isochrone, showAll])

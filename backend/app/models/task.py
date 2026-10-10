@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.common import Coord
 from app.models.poi import CategoryKey
@@ -44,11 +44,23 @@ class TaskStage(StrEnum):
 class AnalysisParams(BaseModel):
     """分析参数。归一化后参与参数哈希：相同参数命中活跃/已完成任务直接复用（省配额）。"""
 
-    origin: Coord = Field(description="中心点（crs 可选 bd09/gcj02/wgs84，内部统一转 bd09）")
+    origin: Coord = Field(description="代表中心（多源时 = 出入口质心，crs 统一转 bd09）")
+    entry_points: list[Coord] = Field(
+        default_factory=list,
+        max_length=3,
+        description="等时圈源点（1~3 个小区出入口；缺省回填 [origin]，单点 = 原行为）",
+    )
     minutes: int = Field(default=15, ge=1, le=30, description="步行时长阈值（分钟）")
     categories: list[CategoryKey] = Field(
         default_factory=lambda: list(DEFAULT_CATEGORIES), description="参与的设施大类"
     )
+
+    @model_validator(mode="after")
+    def _fill_entry_points(self) -> AnalysisParams:
+        """缺省出入口回填 [origin]：单点场景 = 现有行为，零改动。"""
+        if not self.entry_points:
+            self.entry_points = [self.origin]
+        return self
 
 
 class AnalysisTask(BaseModel):

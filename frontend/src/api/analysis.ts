@@ -9,12 +9,18 @@ export async function createAnalysis(params: {
   crs?: string
   minutes?: number
   categories?: CategoryKey[]
+  /** 多源等时圈出入口（长度 >1 时走并集，中心由后端取质心） */
+  entryPoints?: { lng: number; lat: number }[]
 }): Promise<AnalysisTask> {
-  const { data } = await api.post<AnalysisTask>('/analyses', {
-    origin: { lng: params.lng, lat: params.lat, crs: params.crs ?? 'bd09' },
+  const multi = params.entryPoints && params.entryPoints.length > 1
+  const body: Record<string, unknown> = {
+    ...(multi
+      ? { entry_points: params.entryPoints!.map((p) => ({ lng: p.lng, lat: p.lat, crs: 'bd09' })) }
+      : { origin: { lng: params.lng, lat: params.lat, crs: params.crs ?? 'bd09' } }),
     ...(params.minutes ? { minutes: params.minutes } : {}),
     ...(params.categories?.length ? { categories: params.categories } : {}),
-  })
+  }
+  const { data } = await api.post<AnalysisTask>('/analyses', body)
   return data
 }
 
