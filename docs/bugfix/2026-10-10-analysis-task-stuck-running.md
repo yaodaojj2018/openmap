@@ -1,6 +1,6 @@
 # BF-011 真实模式下体检分析「卡在盲区识别」不结束（前端任务状态机缺终态迁移）
 
-- 日期：2026-10-10 　提交：<待回填> 　影响模块：`frontend/src/hooks/useAnalysisTask.ts`、`frontend/src/stores/analysis.ts`
+- 日期：2026-10-10 　提交：bd26a2b 　影响模块：`frontend/src/hooks/useAnalysisTask.ts`、`frontend/src/stores/analysis.ts`
 
 ## 现象
 
