@@ -7,11 +7,11 @@
 import { lazy, Suspense, useCallback, useState } from 'react'
 import {
   Alert,
+  AutoComplete,
   Button,
   Card,
   Checkbox,
   Empty,
-  Input,
   List,
   message,
   Progress,
@@ -24,7 +24,12 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { SearchOutlined, ReloadOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import {
+  SearchOutlined,
+  ReloadOutlined,
+  PlayCircleOutlined,
+  HistoryOutlined,
+} from '@ant-design/icons'
 import MapCanvas from '../components/map/MapCanvas'
 import OriginMarker from '../components/map/OriginMarker'
 import PoiMarkers from '../components/map/PoiMarkers'
@@ -38,6 +43,12 @@ import { fetchDemoHint, geocode } from '../api/geo'
 import { STAGE_LABELS, useAnalysisTask } from '../hooks/useAnalysisTask'
 import { useAnalysisStore } from '../stores/analysis'
 import type { GeocodeCandidate } from '../types/analysis'
+import {
+  addSearchHistory,
+  clearSearchHistory,
+  readSearchHistory,
+  type SearchHistoryEntry,
+} from '../utils/searchHistory'
 
 const { Text, Paragraph } = Typography
 
@@ -66,6 +77,8 @@ export default function AnalysisPage() {
   const [query, setQuery] = useState('')
   const [candidates, setCandidates] = useState<GeocodeCandidate[]>([])
   const [searching, setSearching] = useState(false)
+  // 搜索历史（最近选中的地址 + 坐标），点击可直接定位，无需重复 geocode
+  const [history, setHistory] = useState<SearchHistoryEntry[]>(() => readSearchHistory())
   // 方案 A：地图默认只画阈值圈，多级内圈由开关展开（数据/报告口径不变）
   const [showAllLevels, setShowAllLevels] = useState(false)
   // 多源并集：添加入口模式下，地图点选追加第 2/3 个出入口（而非重置单中心点）
@@ -76,9 +89,27 @@ export default function AnalysisPage() {
     (cand: GeocodeCandidate) => {
       store.getState().setOrigin({ lng: cand.lng, lat: cand.lat }, cand.address)
       setCandidates([])
+      // 记录搜索历史：选中地址即写入，点击历史可直接定位
+      setHistory(addSearchHistory({ address: cand.address, lng: cand.lng, lat: cand.lat }))
     },
     [store],
   )
+
+  // 点击历史条目 → 直接定位到对应坐标，并回填搜索框
+  const onSelectHistory = useCallback(
+    (value: string) => {
+      const entry = history.find((h) => h.address === value)
+      if (!entry) return
+      store.getState().setOrigin({ lng: entry.lng, lat: entry.lat }, entry.address)
+      setQuery(entry.address)
+    },
+    [history, store],
+  )
+
+  const clearHistory = useCallback(() => {
+    clearSearchHistory()
+    setHistory([])
+  }, [])
 
   const onSearch = useCallback(async () => {
     if (query.trim().length < 2) return
@@ -145,6 +176,17 @@ export default function AnalysisPage() {
     }
   }, [runTask, store])
 
+  // 搜索历史下拉项：仅在输入框为空时展示（输入中让位给实时 geocode 候选列表）
+  const historyOptions = history.map((h) => ({
+    value: h.address,
+    label: (
+      <span>
+        <HistoryOutlined style={{ marginRight: 8, color: '#999' }} />
+        {h.address}
+      </span>
+    ),
+  }))
+
   const resultTabs = CATEGORY_LIST.filter((c) => pois[c.key]?.length)
   // 阈值圈 = 最大级别（resolve_levels 保证），其余为可按需展开的内圈
   const isoInnerLabels =
@@ -192,11 +234,32 @@ export default function AnalysisPage() {
               />
             )}
             <Space.Compact style={{ width: '100%' }}>
-              <Input
+              <AutoComplete
+                style={{ flex: 1 }}
                 placeholder="输入地址，如：北京市海淀区中关村大街1号"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onPressEnter={onSearch}
+                onChange={(value) => setQuery(value)}
+                onSelect={onSelectHistory}
+                onInputKeyDown={(e) => {
+                  if (e.key === 'Enter') onSearch()
+                }}
+                options={query.trim() === '' ? historyOptions : []}
+                popupRender={(menu) => (
+                  <>
+                    {menu}
+                    <div
+                      style={{
+                        padding: '4px 12px',
+                        borderTop: '1px solid #f0f0f0',
+                        textAlign: 'right',
+                      }}
+                    >
+                      <Button type="link" size="small" onClick={clearHistory}>
+                        清除历史
+                      </Button>
+                    </div>
+                  </>
+                )}
               />
               <Button type="primary" icon={<SearchOutlined />} loading={searching} onClick={onSearch}>
                 搜索
