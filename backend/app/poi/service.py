@@ -37,7 +37,7 @@ class CategorySpec:
 # 默认分类体系；可用 data/config/poi_taxonomy.json 覆盖（铁律 #4：外部约束配置化）
 DEFAULT_TAXONOMY: tuple[CategorySpec, ...] = (
     CategorySpec("medical", "医疗（药店）", ("药店",), r"药"),
-    CategorySpec("education", "教育（小学）", ("小学", "学校"), r"小学|九年一贯制"),
+    CategorySpec("education", "教育（小学）", ("小学", "学校", "九年一贯制"), r"小学|九年一贯制"),
     CategorySpec("shopping", "购物（菜市场）", ("菜市场",), r"菜市场|农贸市场"),
     CategorySpec("elderly", "养老", ("养老院",), r"养老"),
 )

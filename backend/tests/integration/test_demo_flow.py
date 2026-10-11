@@ -46,6 +46,9 @@ async def test_replay_poi_radius_and_noise() -> None:
     # 教育第二检索词"学校"：召回九年一贯制/门禁 POI（BF：实验小学类校名仅门禁可召回）
     by_school = await provider.search_pois("学校", center, 1300, 20, 5)
     assert len(by_school) == 8
+    # 教育第三检索词"九年一贯制"：按 tag 召回九年一贯制学校（名称不含"小学/学校"词时仍可命中）
+    by_nine = await provider.search_pois("九年一贯制", center, 1300, 20, 5)
+    assert [p.uid for p in by_nine] == ["demo-edu-005"]
 
 
 async def test_replay_walking_route_matches_matrix_model() -> None:
