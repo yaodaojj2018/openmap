@@ -11,7 +11,7 @@ SPEC = CategorySpec(key="medical", label="医疗（药店）", queries=("药店"
 EDU_SPEC = CategorySpec(
     key="education",
     label="教育（小学）",
-    queries=("小学", "学校"),
+    queries=("小学", "学校", "九年一贯制"),
     filter_pattern=r"小学|九年一贯制",
 )
 
