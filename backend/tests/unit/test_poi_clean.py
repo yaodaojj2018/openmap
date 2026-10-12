@@ -4,7 +4,7 @@ import pytest
 
 from app.mapapi.provider import BD09Point
 from app.models.poi import PoiRecord
-from app.poi.service import CategorySpec, clean_records
+from app.poi.service import CategorySpec, clean_records, dedup_landuse_pois
 
 CENTER: BD09Point = (116.316628, 39.981909)
 SPEC = CategorySpec(key="medical", label="医疗（药店）", queries=("药店",), filter_pattern=r"药")
@@ -100,3 +100,19 @@ def test_nine_year_school_kept_by_tag_and_middle_school_filtered() -> None:
     ]
     cleaned = clean_records(records, EDU_SPEC, CENTER, dedup_distance_m=30.0)
     assert [r.uid for r in cleaned] == ["nine"]
+
+
+# ---- 居住掩膜去重（docs/06 §6.4）----
+
+
+def test_dedup_landuse_pois_uid_and_same_name_nearby() -> None:
+    """用地三词召回高度重叠：同 uid / 同名 30m 内去重，异名小区保留。"""
+    records = [
+        poi("r1", "科源社区", 0.001, 0.001),
+        poi("r1", "科源社区", 0.0012, 0.0012),  # 同 uid 重复（三词各召回一次）
+        poi("r2", "科源社区", 0.0011, 0.0011),  # 同名 ~14m 内（连锁重复）
+        poi("r3", "知春里小区", 0.005, 0.005),  # 异名，保留
+    ]
+    out = dedup_landuse_pois(records, CENTER, dedup_distance_m=30.0)
+    assert [r.uid for r in out] == ["r1", "r3"]
+    assert out[0].distance_m is not None and out[1].distance_m is not None

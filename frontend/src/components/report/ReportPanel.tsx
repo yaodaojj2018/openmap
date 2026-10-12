@@ -155,6 +155,13 @@ export default function ReportPanel({ report }: { report: AnalysisReport }) {
                   灰色区域为「周边 1 公里内无菜市场/药店/小学」的独立口径判定（直线距离），
                   独立于 15 分钟等时圈，可能落在等时圈之外。
                 </Paragraph>
+                {blindspot?.mask_enabled && (
+                  <Paragraph type="secondary" style={{ marginTop: -4, marginBottom: 8 }}>
+                    居住掩膜：{blindspot.excluded_cells} 格非居住用地已排除（含工业园{' '}
+                    {blindspot.industrial_cells ?? 0} 格），仅 {blindspot.residential_cells}{' '}
+                    格居住格参与判定。
+                  </Paragraph>
+                )}
                 {blindspot == null ? (
                   <Empty description="暂无盲区数据" style={{ padding: 48 }} />
                 ) : blindspot.types.length === 0 ? (

@@ -33,7 +33,7 @@ from app.models.isochrone import IsochroneLevel, IsochroneResult, RouteLeg
 from app.models.poi import PoiRecord, PoiSearchResult
 from app.models.report import AnalysisReport
 from app.models.task import AnalysisParams, TaskStage
-from app.poi.service import load_taxonomy, search_categories
+from app.poi.service import load_taxonomy, search_categories, search_landuse_pois
 
 # 各阶段的全局进度窗口（docs/02 §5.1：等时圈 30%→70%、POI 70%→85%、覆盖 85%→92%、盲区 92%→97%）。
 STAGE_WINDOWS: dict[TaskStage, tuple[float, float]] = {
@@ -348,17 +348,62 @@ async def _run_analysis(
     )
     await reporter.on_progress(STAGE_WINDOWS[TaskStage.coverage][1])
 
-    # ⑤ blindspot：栅格 + cKDTree + 聚合平滑，全本地零 API（docs/02 §3.3）。
+    # ⑤ blindspot：栅格 + cKDTree + 聚合平滑，几何全本地零 API（docs/02 §3.3）；
+    #    新增居住掩膜（docs/06 §6）需一次正向 POI 检索（小区/住宅/楼盘，≤3 次逻辑调用）。
     #    只评估"本次实际检索成功"的类目：未选择/检索失败的类目没有数据，而空设施
     #    列表在栅格语义下是"真实无设施 → 全域缺失"——混入即把数据缺失冒充盲区事实。
     await reporter.on_stage(TaskStage.blindspot)
     searched_keys = set(params.categories) - failed_keys
+    residential: list[PoiRecord] | None = None
+    industrial: list[PoiRecord] | None = None
+    if settings.blindspot_mask_enabled:
+        try:
+            residential = await search_landuse_pois(
+                counting,
+                settings,
+                origin_bd09,
+                settings.poi_search_radius_m,
+                settings.blindspot_residential_queries,
+            )
+            if not residential:
+                # 空命中：研究区内无小区 POI——几乎必为覆盖缺失而非"真无居住"，
+                # 不静默回退，显式降级声明（BF-007：数据缺失 ≠ 事实结论）
+                degraded.append("blindspot:residential:empty")
+                log.warning("analysis.blindspot_residential_empty", task_id=task_id)
+                residential = None
+        except MapApiError as exc:
+            degraded.append("blindspot:residential:unavailable")
+            log.warning(
+                "analysis.blindspot_residential_degraded",
+                task_id=task_id,
+                kind=exc.kind.value,
+            )
+            residential = None
+        # 工业园负向修正：失败/空命中仅记 warning 不降级——它是精化层而非结论数据源
+        # （空命中 = "该区无工业园" 属合法结论，不是数据缺失，不能误判成缺陷）。
+        try:
+            industrial = await search_landuse_pois(
+                counting,
+                settings,
+                origin_bd09,
+                settings.poi_search_radius_m,
+                settings.blindspot_industrial_queries,
+            )
+        except MapApiError as exc:
+            log.warning(
+                "analysis.blindspot_industrial_degraded",
+                task_id=task_id,
+                kind=exc.kind.value,
+            )
+            industrial = None
     blindspot = compute_blindspot(
         origin_bd09,
         facilities,
         settings,
         labels,
         types=[t for t in settings.blindspot_types if t in searched_keys],
+        residential=residential,
+        industrial=industrial,
     )
     await reporter.on_progress(STAGE_WINDOWS[TaskStage.blindspot][1])
 

@@ -38,3 +38,13 @@ class BlindspotResult(BaseModel):
     types: list[BlindspotTypeResult] = Field(default_factory=list)
     max_severity: int = Field(ge=0, description="单栅格最多同时缺失的类数（0..len(types)）")
     severe_cells: int = Field(ge=0, description="同时缺失 ≥2 类的复合盲区栅格数")
+    mask_enabled: bool = Field(default=False, description="是否应用居住掩膜（正向识别居住用地）")
+    residential_cells: int = Field(
+        default=0, ge=0, description="居住掩膜覆盖的栅格数（未启用掩膜时 = 总栅格数）"
+    )
+    excluded_cells: int = Field(
+        default=0, ge=0, description="非居住用地排除的栅格数（未启用掩膜时 = 0）"
+    )
+    industrial_cells: int = Field(
+        default=0, ge=0, description="工业园负向修正扣除的栅格数（居住格中落入工业园半径内的）"
+    )

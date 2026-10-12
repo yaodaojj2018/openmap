@@ -29,6 +29,12 @@ export function formatDegradedFlag(flag: string): string {
   if (flag === 'isochrone:budget:exhausted') {
     return '本次分析 API 预算耗尽，等时圈按模型估算收尾（低置信度，几何仅供参考）'
   }
+  if (flag === 'blindspot:residential:unavailable') {
+    return '居住用地识别失败，盲区按全域研究区计算（可能含公园/水域等非居住用地）'
+  }
+  if (flag === 'blindspot:residential:empty') {
+    return '研究区内未识别到居住小区，盲区按全域研究区计算（可能含非居住用地）'
+  }
   return flag
 }
 

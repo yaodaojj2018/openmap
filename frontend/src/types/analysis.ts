@@ -152,6 +152,11 @@ export interface BlindspotResult {
   types: BlindspotTypeResult[]
   max_severity: number
   severe_cells: number
+  /** 是否应用居住掩膜（docs/06 §6）；旧缓存报告可能缺省 */
+  mask_enabled?: boolean
+  residential_cells?: number
+  excluded_cells?: number
+  industrial_cells?: number
 }
 
 /** 完整分析报告（对齐 backend/app/models/report.py；坐标 bd09） */

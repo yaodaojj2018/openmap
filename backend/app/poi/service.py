@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -149,3 +150,59 @@ async def search_categories(
     selected = [s for s in taxonomy if s.key in category_keys]
     results = await asyncio.gather(*(_one(s) for s in selected))
     return dict(results)
+
+
+async def search_landuse_pois(
+    provider: MapProvider,
+    settings: Settings,
+    center: BD09Point,
+    radius_m: int,
+    queries: Sequence[str],
+) -> list[PoiRecord]:
+    """按关键词组检索用地 POI 并去重（居住正向掩膜与工业园负向修正共用，docs/06 §6）。
+
+    与 search_categories 的差异：用地不是业务类目（不进 taxonomy、无 filter_pattern
+    清洗）——query 本身已高度相关（2026-10-11/12 实测：小区/住宅/楼盘打满 40；工业园/
+    产业园/科技园命中 20/6/16），只需去重。失败抛 MapApiError，由编排层决定降级
+    （BF-007：数据缺失 ≠ 事实结论）。
+    """
+    raw: list[PoiRecord] = []
+    for query in queries:
+        raw.extend(
+            await provider.search_pois(
+                query=query,
+                center=center,
+                radius_m=radius_m,
+                page_size=settings.poi_page_size,
+                max_pages=settings.poi_max_pages,
+            )
+        )
+    return dedup_landuse_pois(raw, center, settings.poi_dedup_distance_m)
+
+
+def dedup_landuse_pois(
+    records: list[PoiRecord], center: BD09Point, dedup_distance_m: float
+) -> list[PoiRecord]:
+    """用地 POI 去重（纯函数）：uid 去重 + 同名 30m 内聚类，回填 distance_m 排序。
+
+    多关键词召回高度重叠（同名同 uid 各词都命中），去重保证 cKDTree 不被重复点污染
+    （不影响最近距离结果，但避免无谓的重复建树开销）。
+    """
+    seen_uids: set[str] = set()
+    name_anchor: dict[str, PoiRecord] = {}
+    out: list[PoiRecord] = []
+    for rec in records:
+        if rec.uid in seen_uids:
+            continue
+        seen_uids.add(rec.uid)
+        anchor = name_anchor.get(rec.name)
+        if anchor and haversine_m(anchor.lng, anchor.lat, rec.lng, rec.lat) < dedup_distance_m:
+            continue
+        name_anchor[rec.name] = rec
+        out.append(
+            rec.model_copy(
+                update={"distance_m": haversine_m(center[0], center[1], rec.lng, rec.lat)}
+            )
+        )
+    out.sort(key=lambda r: r.distance_m or 0.0)
+    return out
