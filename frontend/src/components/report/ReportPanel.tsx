@@ -17,9 +17,15 @@ import {
   Row,
   Space,
   Table,
+  Tooltip,
   Typography,
 } from 'antd'
-import { FileImageOutlined, FilePdfOutlined, FileTextOutlined } from '@ant-design/icons'
+import {
+  FileImageOutlined,
+  FilePdfOutlined,
+  FileTextOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import GaugeOverall from '../charts/GaugeOverall'
 import RadarScore from '../charts/RadarScore'
@@ -30,29 +36,41 @@ import type { AnalysisReport, CategoryCoverage } from '../../types/analysis'
 
 const { Title, Paragraph, Text } = Typography
 
-const TABLE_COLUMNS: ColumnsType<CategoryCoverage> = [
-  { title: '类目', dataIndex: 'label' },
-  { title: '数量', dataIndex: 'total', align: 'right' },
-  { title: '圈内可达', dataIndex: 'reachable', align: 'right' },
-  {
-    title: '覆盖率',
-    key: 'ratio',
-    align: 'right',
-    render: (_, r) => `${(r.coverage_ratio * 100).toFixed(0)}%`,
-  },
-  {
-    title: '平均步行',
-    key: 'avg',
-    align: 'right',
-    render: (_, r) => (r.avg_walk_time_min == null ? '--' : `${r.avg_walk_time_min.toFixed(1)} 分`),
-  },
-  {
-    title: '评分',
-    dataIndex: 'score',
-    align: 'right',
-    render: (v: number) => <Text strong>{v.toFixed(0)}</Text>,
-  },
-]
+// 「数量」检索口径随 poi_search_radius_m 配置变化，列标题附带提示避免与「圈内可达」混淆
+function buildTableColumns(searchRadiusM: number): ColumnsType<CategoryCoverage> {
+  const radiusKm = (searchRadiusM / 1000).toFixed(1)
+  return [
+    { title: '类目', dataIndex: 'label' },
+    {
+      title: (
+        <Tooltip title={`「数量」= 以源点为中心、检索半径 ${radiusKm} km 内召回并去重的设施总数，不等同于「圈内可达」`}>
+          数量 <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+        </Tooltip>
+      ),
+      dataIndex: 'total',
+      align: 'right',
+    },
+    { title: '圈内可达', dataIndex: 'reachable', align: 'right' },
+    {
+      title: '覆盖率',
+      key: 'ratio',
+      align: 'right',
+      render: (_, r) => `${(r.coverage_ratio * 100).toFixed(0)}%`,
+    },
+    {
+      title: '平均步行',
+      key: 'avg',
+      align: 'right',
+      render: (_, r) => (r.avg_walk_time_min == null ? '--' : `${r.avg_walk_time_min.toFixed(1)} 分`),
+    },
+    {
+      title: '评分',
+      dataIndex: 'score',
+      align: 'right',
+      render: (v: number) => <Text strong>{v.toFixed(0)}</Text>,
+    },
+  ]
+}
 
 export default function ReportPanel({ report }: { report: AnalysisReport }) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -142,7 +160,7 @@ export default function ReportPanel({ report }: { report: AnalysisReport }) {
                 <Table
                   size="small"
                   rowKey="category"
-                  columns={TABLE_COLUMNS}
+                  columns={buildTableColumns(report.poi.radius_m)}
                   dataSource={categories}
                   pagination={false}
                 />
