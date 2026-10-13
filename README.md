@@ -30,7 +30,7 @@
 ### 方式一：Docker 一键启动（评审推荐）
 
 ```bash
-cp .env.example .env      # 填入你的 API Key；或保持 DEMO_MODE=1 零配额体验
+cp .env.example .env      # 填入你的 API Key；或保持 OPENMAP_DEMO_MODE=1 零配额体验
 docker compose up -d
 # 打开 http://localhost
 ```
@@ -74,7 +74,9 @@ make compose-up    # Docker 全栈
 | `OPENMAP_BAIDU_SK` | 否 | SN 签名密钥（校验方式选 SN 时填写） |
 | `OPENMAP_DEMO_MODE` | 否 | `1` = 快照回放模式，零 API 消耗 |
 | `OPENMAP_REDIS_URL` | 否 | 空 = 进程内缓存；compose 内置 `redis://redis:6379/0` |
-| `OPENMAP_API_QPS` | 否 | 令牌桶速率，默认 5（按账号配额调整） |
+| `OPENMAP_API_QPS` | 否 | 令牌桶速率，默认 2（对齐免费档"地点检索并发 3"留余量，按账号配额调整） |
+| `OPENMAP_API_BURST` | 否 | 令牌桶突发容量，默认 2（.env.example 建议 3） |
+| `OPENMAP_RETRY_MAX_ATTEMPTS` | 否 | 可重试错误最大尝试次数（含首次），默认 3 |
 | `VITE_BMAP_AK` | 演示模式外必填 | 百度地图 JS API AK（浏览器端，需配置域名白名单） |
 
 完整项见 [.env.example](.env.example)。**密钥永不提交仓库**（已配 gitleaks 扫描）。
@@ -87,6 +89,10 @@ make compose-up    # Docker 全栈
 | GET | `/api/v1/geocode?q=&city=` | 地址 → BD09 坐标候选列表 |
 | GET | `/api/v1/pois?lng=&lat=&crs=bd09&categories=medical,education` | 分类 POI 检索（圆形区域 + 翻页聚合 + 去重清洗） |
 | POST | `/api/v1/isochrone` | 多级步行等时圈（v1 射线采样 + 批量矩阵 + 闭合样条，`{origin, levels_min?}`） |
+| POST | `/api/v1/analyses` | 创建分析任务（202 异步，`{entry_points?/origin, minutes?, categories?}`） |
+| GET | `/api/v1/analyses/{id}/status` | 任务状态（SSE 不可用时轮询兜底） |
+| GET | `/api/v1/analyses/{id}/result` | 完整体检报告（覆盖统计/盲区/评分） |
+| GET | `/api/v1/analyses/{id}/events` | SSE 事件流（15s 心跳 + Last-Event-ID 断线续传） |
 | GET | `/api/v1/demo/hint` | 演示模式示例（示例地址 + 中心点 + 类别） |
 
 ## 项目结构
@@ -95,14 +101,19 @@ make compose-up    # Docker 全栈
 ├── backend/app/
 │   ├── core/        # 配置、坐标系转换(BD09 规范)、限流、缓存、日志
 │   ├── mapapi/      # MapProvider 端口 + 百度适配器 + 快照回放适配器（唯一出站点）
-│   ├── poi/         # POI 分类检索、去重清洗管道
-│   ├── api/         # FastAPI 路由（薄层）
+│   ├── isochrone/   # 等时圈域层（扇形采样 + 并行二分，纯函数）
+│   ├── poi/         # POI 分类检索、去重清洗管道（纯函数）
+│   ├── coverage/    # 覆盖统计域层（三级漏斗，纯函数）
+│   ├── blindspot/   # 盲区识别域层（网格扫描，纯函数）
+│   ├── tasks/       # 分析任务编排（TaskManager：多源并集 → 报告）
+│   ├── api/         # FastAPI 路由（薄层，含 SSE 事件流）
 │   └── models/      # pydantic 领域模型
 ├── frontend/src/
-│   ├── components/map/    # 地图画布 + 图层（OriginMarker / PoiMarkers / ...）
+│   ├── components/map/    # 地图画布 + 图层（OriginMarker / PoiMarkers / IsochroneLayer / BlindspotLayer）
 │   ├── pages/             # AnalysisPage 主工作台
 │   ├── stores/            # zustand 状态
-│   └── api/               # axios + SSE 封装
+│   ├── hooks/             # useAnalysisTask（SSE EventSource + 轮询兜底）
+│   └── api/               # axios 封装
 ├── data/replays/    # 演示/测试用 API 快照（回放模式数据源）
 ├── data/samples/    # 真实社区固化数据集（docs/07 对比报告素材，collect_samples.py 采集）
 ├── docs/            # 需求分析、技术方案、交付文档（03~07）与测试报告
@@ -113,11 +124,12 @@ make compose-up    # Docker 全栈
 ## 测试与质量
 
 ```bash
-cd backend && pytest -q          # 单测(坐标/限流) + 集成(respx mock 异常矩阵) + 回放快照
+cd backend && pytest -q          # 域层单测 + 集成(respx mock 异常矩阵) + 演示回放快照
+cd frontend && npm test          # vitest 回归测试（BF 归档 ↔ 回归用例）
 cd frontend && npm run build     # tsc --strict + vite build
 ```
 
-CI（GitHub Actions）：PR 触发 lint → test → build 三阶段，coverage gate 70%。
+CI（GitHub Actions）：后端（ruff/mypy → BF 归档回归一致性检查 → smoke 冒烟先行 → 全量测试，域层覆盖率门禁 95%）+ 前端（lint / vitest / build）+ compose 构建验证（main 分支）。
 
 ## 许可证
 
