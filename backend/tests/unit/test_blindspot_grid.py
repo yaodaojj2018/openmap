@@ -135,3 +135,107 @@ def test_grid_meta_fields() -> None:
     assert result.cell_size_m == 500
     assert result.threshold_m == 1000
     assert result.origin.lng == ORIGIN[0] and result.origin.crs == "bd09"
+
+
+# ---- 居住掩膜（docs/06 §6，正向识别居住用地）----
+
+_RES_RADIUS = 300  # 测试用半径：北格（距居住 POI 250m）在内、南格（559m）在外
+
+
+def _residential() -> list[PoiRecord]:
+    """居住 POI 覆盖北行两格（格心距 250m ≤ 半径 300），南行两格为非居住。"""
+    return [poi_at(0.0, 250.0, "res-north")]
+
+
+def test_mask_excludes_non_residential_missing_cells() -> None:
+    """非居住格即使距设施 >1km 也不计缺口：南行距设施 ~1177m 但非居住 → 不缺失。"""
+    residential = _residential()
+    result = compute_blindspot(
+        ORIGIN,
+        {"medical": [poi_at(0.0, 900.0, "m1")]},
+        settings(blindspot_residential_radius_m=_RES_RADIUS),
+        {"medical": "医疗"},
+        residential=residential,
+    )
+    med = result.types[0]
+    assert med.missing_cells == 0  # 南行本应缺失（1177m>1000），但非居住被排除
+    assert med.worst_distance_m is None
+    assert med.polygons == []
+    assert result.mask_enabled is True
+    assert result.residential_cells == 2
+    assert result.excluded_cells == 2
+
+
+def test_mask_keeps_residential_missing_cells() -> None:
+    """居住格仍按原口径判缺失：设施在南侧 (0,-900)，居住北行 ~1177m → 缺失。"""
+    result = compute_blindspot(
+        ORIGIN,
+        {"medical": [poi_at(0.0, -900.0, "m1")]},
+        settings(blindspot_residential_radius_m=_RES_RADIUS),
+        {"medical": "医疗"},
+        residential=_residential(),
+    )
+    med = result.types[0]
+    assert med.missing_cells == 2  # 北行两格居住且缺失
+    assert med.worst_distance_m == pytest.approx(1176.76, abs=1.0)
+    assert result.residential_cells == 2
+    assert result.excluded_cells == 2
+
+
+def test_mask_empty_type_only_residential_cells_missing() -> None:
+    """类目完全无设施时，只有居住格全域缺失（非居住格不判）——不再是全图 4 格。"""
+    result = compute_blindspot(
+        ORIGIN,
+        {"shopping": []},
+        settings(blindspot_residential_radius_m=_RES_RADIUS),
+        {"shopping": "购物"},
+        types=["shopping"],
+        residential=_residential(),
+    )
+    shop = result.types[0]
+    assert shop.missing_cells == 2  # 仅居住的北行两格
+    assert result.residential_cells == 2
+    assert result.excluded_cells == 2
+
+
+def test_no_mask_fallback_all_cells() -> None:
+    """residential=None（检索失败/关闭掩膜）：回退全域口径，行为与掩膜前一致。"""
+    result = compute_blindspot(
+        ORIGIN,
+        {"medical": [poi_at(0.0, 900.0, "m1")]},
+        settings(),
+        {"medical": "医疗"},
+    )
+    med = result.types[0]
+    assert med.missing_cells == 2  # 南行缺失（原口径）
+    assert result.mask_enabled is False
+    assert result.residential_cells == 4  # 未掩膜 = 总栅格数
+    assert result.excluded_cells == 0
+
+
+def test_industrial_negative_mask_subtracts_residential_cells() -> None:
+    """工业园负向修正：居住格若落入工业园 POI 半径内则扣除，不再判缺失。
+
+    居住 POI 在原点、半径 400 → 覆盖全部 4 格；设施在原点、阈值 300 → 四格距
+    353.6m 均 >300 本应全缺。工业园 POI 在北侧 (0,250)、半径 300 → 北行两格
+    （距工业园 250m）被扣除，仅剩南行两格判缺失。
+    """
+    result = compute_blindspot(
+        ORIGIN,
+        {"medical": [poi_at(0.0, 0.0, "m-center")]},
+        settings(
+            blindspot_threshold_m=300,
+            blindspot_residential_radius_m=400,
+            blindspot_industrial_radius_m=300,
+        ),
+        {"medical": "医疗"},
+        residential=[poi_at(0.0, 0.0, "res-center")],
+        industrial=[poi_at(0.0, 250.0, "ind-north")],
+    )
+    med = result.types[0]
+    # 无工业园时四格全缺；扣除北行两格后仅南行两格判缺失
+    assert med.missing_cells == 2
+    assert result.mask_enabled is True
+    assert result.residential_cells == 2
+    assert result.industrial_cells == 2
+    assert result.excluded_cells == 2

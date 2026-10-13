@@ -31,6 +31,8 @@ def compute_blindspot(
     settings: Settings,
     labels: dict[str, str],
     types: Sequence[str] | None = None,
+    residential: list[PoiRecord] | None = None,
+    industrial: list[PoiRecord] | None = None,
 ) -> BlindspotResult:
     """栅格盲区识别入口。
 
@@ -38,6 +40,16 @@ def compute_blindspot(
     由编排层注入——只应包含本次实际检索成功的类目：空设施列表在本域语义是
     "真实无设施 → 全域缺失"，未选择/检索失败的类目没有数据，混入等于把
     数据缺失冒充成盲区事实。缺省回退 settings.blindspot_types。
+
+    residential 为居住用地 POI（正向掩膜，docs/06 §6）：非 None 且非空时只对
+    「格心到最近居住 POI ≤ blindspot_residential_radius_m」的居住格判缺失，公园/
+    水域/道路等非居住格不计入缺口（消除"湖泊被标成缺教育"的假警报）。None/空 =
+    不掩膜（全格参与），编排层在检索失败/空命中时传 None 降级为全域口径并显式标记。
+
+    industrial 为工业园 POI（负向修正，docs/06 §6）：居住格若同时落在
+    「距最近工业园 POI ≤ blindspot_industrial_radius_m」内则扣除——正向掩膜的 200m
+    缓冲会漫入紧邻的工业园（城北万象城实测命中 20+），故加一层负向把园区核心扣掉。
+    None/空 = 不扣（编排层在工业园检索失败/空命中时传 None，仅记 warning 不降级）。
     """
     cell = settings.blindspot_cell_m
     extent = settings.blindspot_extent_m
@@ -46,6 +58,26 @@ def compute_blindspot(
     centers = np.arange(side, dtype=float) * cell - extent / 2 + cell / 2
     gx, gy = np.meshgrid(centers, centers)  # 行 = 北向 y，列 = 东向 x
     grid_pts = np.column_stack([gx.ravel(), gy.ravel()])
+
+    # 居住掩膜（docs/06 §6.4）：居住 POI 建 cKDTree，格心距最近居住 POI ≤ 半径判居住格。
+    # 非居住格在每类判定中恒为 False → 不参与缺失/严重度，天然从结果中排除。
+    if residential:
+        res_pts = np.array([local_delta_m(origin[0], origin[1], r.lng, r.lat) for r in residential])
+        res_dist, _ = cKDTree(res_pts).query(grid_pts)
+        res_mask = res_dist <= settings.blindspot_residential_radius_m
+    else:
+        res_mask = np.ones(grid_pts.shape[0], dtype=bool)
+    # 工业园负向修正（docs/06 §6）：居住格若同时落在工业园 POI 半径内则扣除。
+    # 负向只作用于「已判居住」的格，天然有界——不会反向吃掉远离小区的真居住区。
+    if industrial:
+        ind_pts = np.array([local_delta_m(origin[0], origin[1], r.lng, r.lat) for r in industrial])
+        ind_dist, _ = cKDTree(ind_pts).query(grid_pts)
+        ind_mask = ind_dist <= settings.blindspot_industrial_radius_m
+    else:
+        ind_mask = np.zeros(grid_pts.shape[0], dtype=bool)
+    effective_res_mask = res_mask & ~ind_mask
+    industrial_cells = int((res_mask & ind_mask).sum())
+    total_cells = int(grid_pts.shape[0])
 
     type_results: list[BlindspotTypeResult] = []
     missing_stack: list[np.ndarray] = []
@@ -56,11 +88,11 @@ def compute_blindspot(
             # 副本在常数修正时与时间场口径脱钩（BF-001 类漂移）
             fac_pts = np.array([local_delta_m(origin[0], origin[1], r.lng, r.lat) for r in recs])
             distances, _ = cKDTree(fac_pts).query(grid_pts)
-            missing = distances > settings.blindspot_threshold_m
+            missing = (distances > settings.blindspot_threshold_m) & effective_res_mask
             worst = float(distances[missing].max()) if missing.any() else None
         else:
-            # 该类完全无设施：全域缺失，worst 无意义（不存在"最远的最近设施"）
-            missing = np.ones(grid_pts.shape[0], dtype=bool)
+            # 该类完全无设施：有效居住格全域缺失，worst 无意义（不存在"最远的最近设施"）
+            missing = effective_res_mask.copy()
             worst = None
         missing_stack.append(missing)
         type_results.append(
@@ -85,6 +117,10 @@ def compute_blindspot(
         types=type_results,
         max_severity=int(severity.max()) if severity.size else 0,
         severe_cells=int((severity >= 2).sum()),
+        mask_enabled=bool(residential),
+        residential_cells=int(effective_res_mask.sum()),
+        excluded_cells=total_cells - int(effective_res_mask.sum()),
+        industrial_cells=industrial_cells,
     )
 
 

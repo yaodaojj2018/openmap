@@ -51,6 +51,30 @@ async def test_replay_poi_radius_and_noise() -> None:
     assert [p.uid for p in by_nine] == ["demo-edu-005"]
 
 
+async def test_replay_residential_pois() -> None:
+    """居住掩膜回放（docs/06 §6）：小区/住宅/楼盘 三词均召回快照中的居住 POI。"""
+    provider = load_provider()
+    center = (116.316628, 39.981909)
+    for query in ("小区", "住宅", "楼盘"):
+        hits = await provider.search_pois(query, center, 1300, 20, 5)
+        assert [p.uid for p in hits] == [
+            "demo-res-001",
+            "demo-res-002",
+            "demo-res-003",
+            "demo-res-004",
+        ]
+
+
+async def test_replay_industrial_pois() -> None:
+    """工业园负向修正回放（docs/06 §6）：科技园/产业园 召回、工业园 空命中均合法。"""
+    provider = load_provider()
+    center = (116.316628, 39.981909)
+    for query in ("科技园", "产业园"):
+        hits = await provider.search_pois(query, center, 1300, 20, 5)
+        assert [p.uid for p in hits] == ["demo-ind-001", "demo-ind-002"]
+    assert await provider.search_pois("工业园", center, 1300, 20, 5) == []
+
+
 async def test_replay_walking_route_matches_matrix_model() -> None:
     """降级链中间级回放（docs/02 §3.4）：walking_route 与 route_matrix 同模型——
     同一 OD 两法结果必须一致，否则降级前后判定口径漂移。"""

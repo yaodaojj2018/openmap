@@ -104,6 +104,13 @@ class Settings(BaseSettings):
     blindspot_buffer_m: float = 50.0  # 缺失栅格聚合平滑缓冲（8 邻接融合）
     blindspot_types: list[str] = ["medical", "education", "shopping"]  # 参与判定的关键设施类目
 
+    # ---- 盲区居住掩膜（docs/06 §6.5：正向识别居住用地，非居住格不计入缺口）----
+    blindspot_mask_enabled: bool = True  # 掩膜总开关（评审兜底可关）
+    blindspot_residential_queries: list[str] = ["小区", "住宅", "楼盘"]  # 正向居住关键词
+    blindspot_residential_radius_m: int = 200  # 格心到最近居住 POI ≤ 此值判居住格（点→面近似半径）
+    blindspot_industrial_queries: list[str] = ["工业园", "产业园", "科技园"]  # 负向修正关键词
+    blindspot_industrial_radius_m: int = 300  # 格心到最近工业园 POI ≤ 此值判工业格（负向扣除）
+
     # ---- 分析任务（docs/02 §5.2）----
     task_ttl_s: int = 24 * 3600  # 任务状态/报告持久化 TTL（Redis 场景跨重启可恢复）
     analysis_api_budget: int = 40  # 单次分析出站 HTTP 硬上限（docs/02 §3.4 QuotaBudget）

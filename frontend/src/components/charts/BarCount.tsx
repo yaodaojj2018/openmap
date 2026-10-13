@@ -13,7 +13,8 @@ export default function BarCount({ categories }: Props) {
     () => ({
       tooltip: { trigger: 'axis' as const },
       legend: { bottom: 0 },
-      grid: { left: 40, right: 16, top: 24, bottom: 32 },
+      // 底部留出足够空间，避免图例（颜色注释）与 X 轴类目标签重叠
+      grid: { left: 40, right: 16, top: 24, bottom: 48 },
       xAxis: {
         type: 'category' as const,
         data: categories.map((c) => c.label),

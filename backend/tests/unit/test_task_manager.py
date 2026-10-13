@@ -210,9 +210,10 @@ async def test_happy_path_state_machine_and_report() -> None:
     assert final.stage is TaskStage.completed
     assert final.progress == 1.0
     assert final.degraded_flags == []
-    # 预算口径：阶段 A 1 次 + 二分 ≤3 次 = 4 次矩阵；四大类各 1 次 + 教育多检索词（学校/九年一贯制）
+    # 预算口径：阶段 A 1 次 + 二分 ≤3 次 = 4 次矩阵；四大类 6 次（教育多检索词）
+    # + 居住掩膜正向 3 次 + 工业园负向 3 次（docs/06 §6）= 12 次 search_pois
     assert final.api_call_stats["route_matrix"] >= 4
-    assert final.api_call_stats["search_pois"] == 6
+    assert final.api_call_stats["search_pois"] == 12
 
     report = await mgr.result(task.task_id)
     assert report is not None
