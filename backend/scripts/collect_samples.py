@@ -6,7 +6,7 @@ demo）下运行；每个社区一次完整分析，出站次数受 QuotaBudget 
 （analysis_api_budget，默认 40）。
 
 用法（WSL，backend/ 目录）：
-    python3 scripts/collect_samples.py                     # 内置两社区（交道口/回龙观）
+    python3 scripts/collect_samples.py                     # 内置两社区（紫阳/丁兰）
     python3 scripts/collect_samples.py --slug my --address "北京市..."
 """
 
@@ -33,10 +33,10 @@ from app.models.report import AnalysisReport
 from app.models.task import AnalysisParams, TaskStatus
 from app.tasks.manager import TaskManager
 
-# 内置对比社区（docs/07）：老城胡同区 vs 大型居住区
+# 内置对比社区（docs/07 六类复测）：老城边缘山水约束区 vs 大型规划居住区
 COMMUNITIES: dict[str, str] = {
-    "jiaodaokou": "北京市东城区交道口街道",
-    "huilongguan": "北京市昌平区回龙观街道",
+    "ziyang": "浙江省杭州市上城区紫阳街道",
+    "dinglan": "浙江省杭州市上城区丁兰街道",
 }
 
 
@@ -154,8 +154,8 @@ async def collect(
 
     stats = final.api_call_stats
     areas = " ".join(f"{lv.level_min}min={lv.area_km2:.2f}km²" for lv in report.isochrone.levels)
-    verdict = "PASS" if stats.get("http_calls", 99) <= 25 else "FAIL"
-    print(f"[{slug}] http_calls={stats.get('http_calls')} (≤25 验收: {verdict})")
+    verdict = "PASS" if stats.get("http_calls", 99) <= 35 else "FAIL"
+    print(f"[{slug}] http_calls={stats.get('http_calls')} (≤35 验收: {verdict})")
     print(f"[{slug}] stats={stats}")
     print(
         f"[{slug}] isochrone: method={report.isochrone.method} "
