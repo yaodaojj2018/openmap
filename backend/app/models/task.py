@@ -15,7 +15,14 @@ from pydantic import BaseModel, Field, model_validator
 from app.models.common import Coord
 from app.models.poi import CategoryKey
 
-DEFAULT_CATEGORIES: tuple[CategoryKey, ...] = ("medical", "education", "shopping", "elderly")
+DEFAULT_CATEGORIES: tuple[CategoryKey, ...] = (
+    "medical",
+    "education",
+    "shopping",
+    "finance",
+    "elderly",
+    "public",
+)
 
 
 class TaskStatus(StrEnum):

@@ -24,7 +24,10 @@ async def pois(
     lat: Annotated[float, Query(description="中心点纬度")],
     crs: Annotated[Crs, Query(description="输入坐标系，内部统一转 bd09")] = "bd09",
     categories: Annotated[
-        str | None, Query(description="逗号分隔类目，缺省全部：medical,education,shopping,elderly")
+        str | None,
+        Query(
+            description="逗号分隔类目，缺省全部：medical,education,shopping,finance,elderly,public"
+        ),
     ] = None,
     radius: Annotated[int | None, Query(ge=100, le=5000, description="检索半径（米）")] = None,
     provider: Annotated[MapProvider | None, Depends(get_provider)] = None,

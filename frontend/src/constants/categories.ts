@@ -12,7 +12,9 @@ export const CATEGORY_LIST: CategoryMeta[] = [
   { key: 'medical', label: '医疗（药店）', color: '#f5222d' },
   { key: 'education', label: '教育（小学）', color: '#1677ff' },
   { key: 'shopping', label: '购物（菜市场）', color: '#52c41a' },
+  { key: 'finance', label: '金融（银行）', color: '#fa8c16' },
   { key: 'elderly', label: '养老', color: '#722ed1' },
+  { key: 'public', label: '公共服务', color: '#13c2c2' },
 ]
 
 export const CATEGORY_MAP: Record<string, CategoryMeta> = Object.fromEntries(

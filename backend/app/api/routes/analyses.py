@@ -44,7 +44,7 @@ class AnalysisRequest(BaseModel):
     )
     minutes: int = Field(default=15, ge=1, le=30, description="步行时长阈值（分钟）")
     categories: list[CategoryKey] = Field(
-        default_factory=list, description="设施大类，空 = 四大类全选"
+        default_factory=list, description="设施大类，空 = 六大类全选"
     )
 
     @model_validator(mode="after")

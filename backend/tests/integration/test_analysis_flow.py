@@ -90,11 +90,18 @@ def test_analysis_api_flow() -> None:
         assert result.status_code == 200
         body = result.json()
         assert [lv["level_min"] for lv in body["isochrone"]["levels"]] == [5, 10, 15]
-        assert set(body["poi"]["categories"]) == {"medical", "education", "shopping", "elderly"}
+        assert set(body["poi"]["categories"]) == {
+            "medical",
+            "education",
+            "shopping",
+            "finance",
+            "elderly",
+            "public",
+        }
         assert body["origin"]["crs"] == "bd09"
         # M3：覆盖判定 + 盲区识别随报告产出
         assert body["coverage"]["threshold_min"] == 15
-        assert len(body["coverage"]["categories"]) == 4
+        assert len(body["coverage"]["categories"]) == 6
         assert {t["type_key"] for t in body["blindspot"]["types"]} == {
             "medical",
             "education",

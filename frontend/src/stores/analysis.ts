@@ -57,7 +57,7 @@ interface AnalysisState {
   reset: () => void
 }
 
-const ALL: CategoryKey[] = ['medical', 'education', 'shopping', 'elderly']
+const ALL: CategoryKey[] = ['medical', 'education', 'shopping', 'finance', 'elderly', 'public']
 
 const TASK_DEFAULTS = {
   taskId: null,
