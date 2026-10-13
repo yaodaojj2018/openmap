@@ -23,7 +23,7 @@ api/ → tasks/ → 域层(纯函数) → MapProvider 协议 ←── BaiduClie
 | 方法 | 用途 | 调用量级（单次分析） |
 |------|------|---------------------|
 | `geocode(address, city)` | 地址 → BD09 坐标 | 0~1（前端地图点选则 0） |
-| `search_pois(query, center, radius, page_size, max_pages)` | 圆形区域 POI 检索（内部翻页聚合） | 6（四大类各一次 + 教育第二/三检索词"学校""九年一贯制"） |
+| `search_pois(query, center, radius, page_size, max_pages)` | 圆形区域 POI 检索（内部翻页聚合） | 8（六大类各一次 + 教育第二/三检索词"学校""九年一贯制"） |
 | `route_matrix(origin, destinations)` | 单源批量步行时长矩阵（内部按批量上限分片） | 5~6（等时圈 4~5 + 覆盖边缘带 1） |
 | `walking_route(origin, destination)` | 单 OD 步行规划（降级链第二级专用） | 0（矩阵健康时不出站） |
 | `close()` | 释放连接池 | — |

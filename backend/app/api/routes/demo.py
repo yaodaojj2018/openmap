@@ -20,7 +20,7 @@ DEFAULT_HINT: dict[str, object] = {
         {"lng": 116.315628, "lat": 39.981909, "crs": "bd09"},
         {"lng": 116.317628, "lat": 39.981909, "crs": "bd09"},
     ],
-    "categories": ["medical", "education", "shopping", "elderly"],
+    "categories": ["medical", "education", "shopping", "finance", "elderly", "public"],
 }
 
 

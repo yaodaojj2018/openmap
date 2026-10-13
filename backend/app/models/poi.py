@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.models.common import Coord
 
-CategoryKey = Literal["medical", "education", "shopping", "elderly"]
+CategoryKey = Literal["medical", "education", "shopping", "finance", "elderly", "public"]
 
 
 class PoiRecord(BaseModel):

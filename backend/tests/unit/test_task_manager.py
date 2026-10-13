@@ -210,16 +210,23 @@ async def test_happy_path_state_machine_and_report() -> None:
     assert final.stage is TaskStage.completed
     assert final.progress == 1.0
     assert final.degraded_flags == []
-    # 预算口径：阶段 A 1 次 + 二分 ≤3 次 = 4 次矩阵；四大类 6 次（教育多检索词）
-    # + 居住掩膜正向 3 次 + 工业园负向 3 次（docs/06 §6）= 12 次 search_pois
+    # 预算口径：阶段 A 1 次 + 二分 ≤3 次 = 4 次矩阵；六大类 8 次（教育多检索词）
+    # + 居住掩膜正向 3 次 + 工业园负向 3 次（docs/06 §6）= 14 次 search_pois
     assert final.api_call_stats["route_matrix"] >= 4
-    assert final.api_call_stats["search_pois"] == 12
+    assert final.api_call_stats["search_pois"] == 14
 
     report = await mgr.result(task.task_id)
     assert report is not None
     assert [lv.level_min for lv in report.isochrone.levels] == [5, 10, 15]
     assert report.origin.crs == "bd09"
-    assert set(report.poi.categories) == {"medical", "education", "shopping", "elderly"}
+    assert set(report.poi.categories) == {
+        "medical",
+        "education",
+        "shopping",
+        "finance",
+        "elderly",
+        "public",
+    }
     assert report.api_call_stats == final.api_call_stats
     # M3：覆盖判定与盲区识别随报告产出
     assert report.coverage is not None
@@ -227,7 +234,9 @@ async def test_happy_path_state_machine_and_report() -> None:
         "medical",
         "education",
         "shopping",
+        "finance",
         "elderly",
+        "public",
     ]
     assert len(report.coverage.facilities) == sum(len(v) for v in report.poi.categories.values())
     assert report.blindspot is not None
@@ -315,7 +324,8 @@ async def test_poi_single_category_failure_degrades() -> None:
         "失败类目不参与盲区判定"
     )
     scores = {c.category: c.score for c in report.coverage.categories}
-    expected = round((scores["education"] + scores["shopping"] + scores["elderly"]) / 3, 1)
+    non_failed = ["education", "shopping", "finance", "elderly", "public"]
+    expected = round(sum(scores[k] for k in non_failed) / len(non_failed), 1)
     assert report.overall_score == expected, "失败类目的 0 分不计入综合评分"
 
 

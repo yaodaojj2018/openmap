@@ -6,7 +6,7 @@
       { "lng": 116.315628, "lat": 39.981909, "crs": "bd09" },
       { "lng": 116.317628, "lat": 39.981909, "crs": "bd09" }
     ],
-    "categories": ["medical", "education", "shopping", "elderly"]
+    "categories": ["medical", "education", "shopping", "finance", "elderly", "public"]
   },
   "geocode": {
     "北京市海淀区中关村大街1号": {
@@ -42,6 +42,9 @@
     { "uid": "demo-edu-noise2", "name": "中关村第一中学", "lng": 116.316928, "lat": 39.982409, "address": "示范中学噪音条目（学校召回但不属小学类目）", "tag": "教育培训;中学;初中", "queries": ["学校"] },
     { "uid": "demo-shop-001", "name": "中关村菜市场", "lng": 116.315628, "lat": 39.982409, "address": "中关村东路1号", "tag": "菜市场", "queries": ["菜市场"] },
     { "uid": "demo-shop-002", "name": "科源社区农贸市场", "lng": 116.319628, "lat": 39.977909, "address": "科源社区", "tag": "农贸市场", "queries": ["菜市场"] },
+    { "uid": "demo-fin-001", "name": "中国工商银行(中关村支行)", "lng": 116.318628, "lat": 39.980909, "address": "中关村大街3号", "tag": "银行", "queries": ["银行"] },
+    { "uid": "demo-fin-002", "name": "招商银行24小时自助银行", "lng": 116.314628, "lat": 39.982409, "address": "海淀南路6号", "tag": "银行;ATM", "queries": ["银行"] },
+    { "uid": "demo-pub-001", "name": "中关村社区卫生服务中心", "lng": 116.312628, "lat": 39.979909, "address": "科学院南路1号", "tag": "社区卫生服务中心", "queries": ["社区卫生服务中心"] },
     { "uid": "demo-eld-001", "name": "中关村街道养老照料中心", "lng": 116.314628, "lat": 39.978909, "address": "中关村南路3号", "tag": "养老", "queries": ["养老院"] },
     { "uid": "demo-eld-002", "name": "乐龄养老院(海淀院)", "lng": 116.322628, "lat": 39.982909, "address": "知春路29号", "tag": "养老", "queries": ["养老院"] },
     { "uid": "demo-res-001", "name": "科源社区", "lng": 116.316628, "lat": 39.982409, "address": "中关村东路1号", "tag": "住宅区", "queries": ["小区", "住宅", "楼盘"] },

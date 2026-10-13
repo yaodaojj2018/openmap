@@ -50,6 +50,12 @@ async def test_replay_poi_radius_and_noise() -> None:
     by_nine = await provider.search_pois("九年一贯制", center, 1300, 20, 5)
     assert [p.uid for p in by_nine] == ["demo-edu-005"]
 
+    # 新增金融/公共服务类目（2026-10-13 六类扩展）：回放池须覆盖新检索词
+    finance = await provider.search_pois("银行", center, 1300, 20, 5)
+    assert [p.uid for p in finance] == ["demo-fin-001", "demo-fin-002"]
+    public = await provider.search_pois("社区卫生服务中心", center, 1300, 20, 5)
+    assert [p.uid for p in public] == ["demo-pub-001"]
+
 
 async def test_replay_residential_pois() -> None:
     """居住掩膜回放（docs/06 §6）：小区/住宅/楼盘 三词均召回快照中的居住 POI。"""
@@ -108,9 +114,13 @@ def test_api_demo_flow() -> None:
         origin = hint["origin"]
         pois = client.get(
             "/api/v1/pois",
-            params={"lng": origin["lng"], "lat": origin["lat"], "categories": "medical,education"},
+            params={
+                "lng": origin["lng"],
+                "lat": origin["lat"],
+                "categories": "medical,education,finance,public",
+            },
         ).json()
-        assert set(pois["categories"]) == {"medical", "education"}
+        assert set(pois["categories"]) == {"medical", "education", "finance", "public"}
         names = [p["name"] for p in pois["categories"]["medical"]]
         assert "金象大药房(中关村店)" in names
         # 同名 30m 内去重：同名只出现一次
@@ -126,6 +136,12 @@ def test_api_demo_flow() -> None:
         # 同校门禁在主体在场时坍缩，不得重复计数
         assert "中关村第二小学-南门" not in edu_names
         assert edu_names.count("中关村第二小学") == 1
+        # 新增类目经清洗管道召回（按距离升序，故用 sorted 断集合不断序）
+        assert sorted(p["name"] for p in pois["categories"]["finance"]) == [
+            "中国工商银行(中关村支行)",
+            "招商银行24小时自助银行",
+        ]
+        assert [p["name"] for p in pois["categories"]["public"]] == ["中关村社区卫生服务中心"]
 
         bad = client.get("/api/v1/pois", params={"lng": 10, "lat": 10, "categories": "foo"})
         assert bad.status_code == 422

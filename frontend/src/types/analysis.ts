@@ -2,7 +2,13 @@
 
 export type Crs = 'bd09' | 'gcj02' | 'wgs84'
 
-export type CategoryKey = 'medical' | 'education' | 'shopping' | 'elderly'
+export type CategoryKey =
+  | 'medical'
+  | 'education'
+  | 'shopping'
+  | 'finance'
+  | 'elderly'
+  | 'public'
 
 export interface GeocodeCandidate {
   address: string

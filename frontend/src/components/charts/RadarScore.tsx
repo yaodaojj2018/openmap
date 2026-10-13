@@ -1,4 +1,4 @@
-/** 雷达图（docs/01 §7 图表端）：四大类覆盖评分一览，面积填充便于看短板。 */
+/** 雷达图（docs/01 §7 图表端）：六大类覆盖评分一览，面积填充便于看短板。 */
 
 import { useMemo } from 'react'
 import EChart from './EChart'
