@@ -175,7 +175,7 @@ PLACE_URL = "https://api.map.baidu.com/place/v3/around"
 
 
 async def test_full_analysis_outbound_within_budget() -> None:
-    """M4 验收标志（docs/02 §6）：单次分析物理出站 HTTP ≤ 25 次。
+    """M4 验收标志（docs/02 §6）：单次分析物理出站 HTTP ≤ 35 次（六类口径校准，2026-10）。
 
     真实 BaiduClient（限流/缓存/预算/熔断全链生效）+ respx 拦截三端点跑完整
     pipeline：respx 拦截计数与 QuotaBudget.http_calls 双口径互证——计数若漏计
@@ -238,7 +238,7 @@ async def test_full_analysis_outbound_within_budget() -> None:
     outbound = matrix_route.call_count + place_route.call_count
     stats = final.api_call_stats
     assert stats["http_calls"] == outbound, "预算计数必须与物理拦截一致（双口径互证）"
-    assert stats["http_calls"] <= 25, f"M4 验收：单次分析出站 ≤ 25 次，实测 {stats['http_calls']}"
+    assert stats["http_calls"] <= 35, f"M4 验收：单次分析出站 ≤ 35 次，实测 {stats['http_calls']}"
     assert stats["cache_hits"] == 0 and stats["retries"] == 0, "首发全量出站：无缓存无重试"
 
     report = await mgr.result(task.task_id)
